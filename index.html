@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07111f">
+    <title>美股急跌雷達</title>
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">US EQUITY MONITOR</p>
+          <h1>美股急跌雷達</h1>
+          <p class="lede">30 分鐘急跌 × 5 分鐘爆量，手機可直接查看 TradingView 圖表。</p>
+        </div>
+        <button id="refresh" class="refresh" type="button">重新整理</button>
+      </header>
+
+      <section class="status-grid" aria-label="監控狀態">
+        <article class="metric">
+          <span>市場狀態</span>
+          <strong id="market-status">讀取中</strong>
+        </article>
+        <article class="metric">
+          <span>符合條件</span>
+          <strong id="alert-count">—</strong>
+        </article>
+        <article class="metric">
+          <span>最後更新（台北）</span>
+          <strong id="updated-at">—</strong>
+        </article>
+      </section>
+
+      <section class="rules">
+        <h2>預設規則</h2>
+        <p>30 分鐘跌幅 ≤ -3%、最新 5 分鐘成交量 ≥ 前 20 根中位數 3 倍、價格 ≥ USD 5，且日均成交額 ≥ USD 20M。</p>
+      </section>
+
+      <section class="monitor">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">CURRENT CANDIDATES</p>
+            <h2>目前警示</h2>
+          </div>
+          <p id="scan-coverage" class="muted"></p>
+        </div>
+        <div id="alerts" class="alerts" aria-live="polite"></div>
+        <p id="empty" class="empty" hidden>目前沒有符合條件的標的。</p>
+      </section>
+
+      <footer>
+        <p id="source-note"></p>
+        <p>此頁僅供研究與監控，不是即時報價、投資建議或下單訊號。</p>
+      </footer>
+    </main>
+    <script src="assets/app.js"></script>
+  </body>
+</html>
