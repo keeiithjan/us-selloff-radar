@@ -5,7 +5,9 @@
     {"key": "nasdaq", "label": "NASDAQ 100 期貨", "ticker": "NQ=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:NQ1!"},
     {"key": "dow", "label": "道瓊期貨", "ticker": "YM=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CBOT_MINI:YM1!"},
     {"key": "sox", "label": "SOX 期貨", "ticker": "SOX=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:SOX1!"},
-    {"key": "russell", "label": "Russell 2000 期貨", "ticker": "RTY=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:RTY1!"}
+    {"key": "russell", "label": "Russell 2000 期貨", "ticker": "RTY=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:RTY1!"},
+    {"key": "japan", "label": "日經 225 期貨", "ticker": "NKD=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME:NKD1!"},
+    {"key": "korea", "label": "南韓 KOSPI 200 期貨", "ticker": "KOSPI200=F", "currency": "KRW", "unavailable": true, "tradingview_symbol": "KRX:K2I1!"}
   ],
   "premarket": {"active": false, "threshold_pct": 2, "scanned_symbols": 0, "movers": []},
   "source": "Yahoo Finance via yfinance；期貨與盤前報價可能延遲。",

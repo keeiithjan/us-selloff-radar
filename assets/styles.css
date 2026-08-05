@@ -43,7 +43,7 @@ body {
 
 .futures-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   gap: 10px;
   margin-top: 17px;
 }
@@ -56,6 +56,17 @@ body {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+.future-card.up { background: linear-gradient(150deg, #fff 62%, #edf8f1); }
+.future-card.down { background: linear-gradient(150deg, #fff 62%, #fff1ed); }
+.future-card:hover { border-color: #c4d1c9; box-shadow: var(--shadow); transform: translateY(-2px); }
+.future-card.is-fresh { animation: future-card-arrive .42s both; animation-delay: var(--card-delay, 0ms); }
+
+@keyframes future-card-arrive {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .future-card::before {
@@ -70,12 +81,42 @@ body {
 
 .future-card.up::before { background: var(--accent); }
 .future-card.down::before { background: var(--danger); }
-.future-label { min-height: 2.45em; margin: 0; color: var(--muted); font-size: .71rem; font-weight: 750; line-height: 1.25; }
-.future-price { display: block; margin-top: 9px; overflow: hidden; font-size: clamp(.95rem, 1.7vw, 1.14rem); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
+.future-label-row { display: flex; min-height: 2.45em; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.future-label { margin: 0; color: var(--muted); font-size: .71rem; font-weight: 750; line-height: 1.25; }
+.quote-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: #b8c0ba;
+}
+.quote-pulse.live { background: var(--accent); animation: quote-pulse 1.6s ease-in-out infinite; }
+@keyframes quote-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(35 115 92 / 0%); opacity: .65; }
+  50% { box-shadow: 0 0 0 5px rgb(35 115 92 / 16%); opacity: 1; }
+}
+.future-price { display: block; margin-top: 9px; overflow: hidden; font-size: clamp(.95rem, 1.7vw, 1.14rem); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; animation: future-value-pop .55s ease-out both; animation-delay: var(--card-delay, 0ms); }
+@keyframes future-value-pop {
+  from { filter: blur(2px); opacity: .25; transform: translateY(2px); }
+  to { filter: blur(0); opacity: 1; transform: translateY(0); }
+}
 .future-movement { margin: 7px 0 0; color: var(--muted); font-size: .78rem; font-weight: 750; }
 .future-card.up .future-movement { color: #197052; }
 .future-card.down .future-movement { color: var(--danger); }
-.future-meta { min-height: 2.4em; margin: 11px 0 0; color: var(--muted); font-size: .67rem; line-height: 1.35; }
+.future-sparkline { height: 38px; margin: 10px -2px 1px; overflow: hidden; }
+.future-sparkline svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.sparkline-area { fill: rgb(80 113 98 / 9%); }
+.sparkline-line { fill: none; stroke: #69736d; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; vector-effect: non-scaling-stroke; }
+.sparkline-last { fill: #69736d; stroke: var(--surface); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.future-sparkline.up .sparkline-area { fill: rgb(35 115 92 / 13%); }
+.future-sparkline.up .sparkline-line { stroke: #197052; }
+.future-sparkline.up .sparkline-last { fill: #197052; }
+.future-sparkline.down .sparkline-area { fill: rgb(178 78 66 / 11%); }
+.future-sparkline.down .sparkline-line { stroke: var(--danger); }
+.future-sparkline.down .sparkline-last { fill: var(--danger); }
+.future-meta { min-height: 1.3em; margin: 9px 0 0; color: var(--muted); font-size: .67rem; line-height: 1.35; }
 .future-link { display: inline-block; margin-top: 10px; color: var(--ink); font-size: .72rem; font-weight: 800; text-decoration-color: #aab4ac; text-underline-offset: 3px; }
 .future-link:hover { color: var(--accent); }
 
@@ -289,4 +330,11 @@ footer p { margin-bottom: 8px; }
   .alert-top { align-items: flex-start; }
   .sequential-controls label { width: 100%; }
   .sequential-controls select { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quote-pulse.live,
+  .future-card.is-fresh,
+  .future-price { animation: none; }
+  .future-card:hover { transform: none; }
 }

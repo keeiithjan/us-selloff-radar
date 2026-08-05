@@ -67,7 +67,13 @@ ZONE_INSIDE_LENGTH = 50
 ZONE_OUTSIDE_LENGTH = 75
 MOMENTUM_SMOOTHING_LENGTH = 14
 MOMENTUM_PRIOR_BARS = 5
-BREAKDOWN_LOOKBACK_BARS = 60
+# The Trend Trader ribbon supplied by the user uses current-timeframe EMA 50
+# and EMA 100.  A yellow AI Momentum line must reach this ribbon's lower edge
+# (or break below it) while sloping down within this many bars before a sell TD.
+TREND_RIBBON_FAST_LENGTH = 50
+TREND_RIBBON_SLOW_LENGTH = 100
+YELLOW_TREND_LOOKBACK_BARS = 30
+YELLOW_LOWER_EDGE_TOLERANCE_PCT = 0.001
 
 
 @dataclass(frozen=True)
@@ -489,10 +495,18 @@ def wilder_rsi(close: pd.Series, length: int) -> pd.Series:
 def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     """Calculate the bearish parts of the supplied AI Momentum indicator.
 
-    ``yellow_mid`` is the source indicator's yellow line.  ``lower_inside``
-    and ``lower_outside`` are the inner and outer lower trend-band boundaries.
+    ``yellow_mid`` is the yellow ``zoneMid`` line from AI Momentum.  The
+    Trend Trader script is calculated separately as EMA 50 / EMA 100; its
+    lower ribbon edge is the only trend-band edge used for the yellow-line
+    confirmation.
     """
-    columns = ["yellow_mid", "lower_inside", "lower_outside", "bearish_bar", "very_bearish"]
+    columns = [
+        "yellow_mid",
+        "trend_lower_edge",
+        "trend_upper_edge",
+        "bearish_bar",
+        "very_bearish",
+    ]
     if not {"Open", "High", "Low", "Close", "Volume"}.issubset(frame.columns):
         return pd.DataFrame(index=frame.index, columns=columns)
 
@@ -518,6 +532,18 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
         low.rolling(ZONE_OUTSIDE_LENGTH, min_periods=ZONE_OUTSIDE_LENGTH).min()
     )
     yellow_mid = (upper_inside + lower_inside) / 2
+    ribbon_fast = close.ewm(
+        span=TREND_RIBBON_FAST_LENGTH,
+        adjust=False,
+        min_periods=TREND_RIBBON_FAST_LENGTH,
+    ).mean()
+    ribbon_slow = close.ewm(
+        span=TREND_RIBBON_SLOW_LENGTH,
+        adjust=False,
+        min_periods=TREND_RIBBON_SLOW_LENGTH,
+    ).mean()
+    trend_lower_edge = pd.concat([ribbon_fast, ribbon_slow], axis=1).min(axis=1)
+    trend_upper_edge = pd.concat([ribbon_fast, ribbon_slow], axis=1).max(axis=1)
     kernel_close = rational_quadratic(close)
     minimum_vwma = vwma.rolling(MOMENTUM_SMOOTHING_LENGTH, min_periods=MOMENTUM_SMOOTHING_LENGTH).min()
     bearish_bar = kernel_close < rational_quadratic(minimum_vwma)
@@ -526,8 +552,8 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "yellow_mid": yellow_mid,
-            "lower_inside": lower_inside,
-            "lower_outside": lower_outside,
+            "trend_lower_edge": trend_lower_edge,
+            "trend_upper_edge": trend_upper_edge,
             "bearish_bar": bearish_bar.fillna(False),
             "very_bearish": very_bearish.fillna(False),
         },
@@ -535,76 +561,58 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def momentum_confirmation(features: pd.DataFrame | None, frame: pd.DataFrame, position: int) -> dict[str, object]:
-    """Confirm that TD appears after a completed lower-band breakdown.
+def momentum_confirmation(
+    features: pd.DataFrame | None,
+    position: int,
+    side: str,
+) -> dict[str, object]:
+    """Confirm a *sell* TD with the user's yellow-line / ribbon rule.
 
-    A valid signal must be to the right of an earlier close below the outer
-    lower band, still be below that band, and close no higher than the actual
-    breakdown bar.  This prevents a TD mark inside or above the band from
-    being described as a bearish continuation.
+    A bearish Momentum confirmation is never attached to a buy TD.  For a
+    sell TD, search the current and preceding 29 completed bars.  At least one
+    must have the AI Momentum yellow line on / below Trend Trader's EMA 50/100
+    ribbon lower edge *and* have a negative one-bar yellow-line slope.
     """
-    if features is None or position >= len(features):
-        return {"available": False}
-
-    values = features.iloc[position]
-    yellow_mid = float(values["yellow_mid"])
-    lower_inside = float(values["lower_inside"])
-    lower_outside = float(values["lower_outside"])
-    if not all(np.isfinite(value) for value in (yellow_mid, lower_inside, lower_outside)):
+    if features is None or position >= len(features) or side != "sell":
         return {"available": False}
 
     prior_start = max(0, position - MOMENTUM_PRIOR_BARS)
     prior = features.iloc[prior_start:position]
     bearish_count = int(prior["bearish_bar"].fillna(False).astype(bool).sum())
     very_bearish_count = int(prior["very_bearish"].fillna(False).astype(bool).sum())
-    close = float(frame["Close"].iloc[position])
-    if close < lower_outside:
-        zone_position = "below_band"
-    elif close <= lower_inside:
-        zone_position = "lower_edge"
-    else:
-        zone_position = "not_lower"
 
-    search_start = max(1, position - BREAKDOWN_LOOKBACK_BARS)
-    breakdown_position: int | None = None
-    for candidate in range(position - 1, search_start - 1, -1):
-        prior_close = float(frame["Close"].iloc[candidate - 1])
-        candidate_close = float(frame["Close"].iloc[candidate])
-        candidate_lower = float(features["lower_outside"].iloc[candidate])
-        prior_lower = float(features["lower_outside"].iloc[candidate - 1])
-        if not all(np.isfinite(value) for value in (prior_close, candidate_close, candidate_lower, prior_lower)):
+    match_position: int | None = None
+    match_zone = ""
+    match_slope: float | None = None
+    search_start = max(1, position - YELLOW_TREND_LOOKBACK_BARS + 1)
+    for candidate in range(position, search_start - 1, -1):
+        yellow = float(features["yellow_mid"].iloc[candidate])
+        previous_yellow = float(features["yellow_mid"].iloc[candidate - 1])
+        lower_edge = float(features["trend_lower_edge"].iloc[candidate])
+        if not all(np.isfinite(value) for value in (yellow, previous_yellow, lower_edge)):
             continue
-        if prior_close >= prior_lower and candidate_close < candidate_lower:
-            breakdown_position = candidate
-            break
+        slope = yellow - previous_yellow
+        edge_tolerance = abs(lower_edge) * YELLOW_LOWER_EDGE_TOLERANCE_PCT
+        if yellow > lower_edge + edge_tolerance or slope >= 0:
+            continue
+        match_position = candidate
+        match_zone = "below_ribbon" if yellow < lower_edge else "lower_edge"
+        match_slope = slope
+        break
 
-    breakdown_close: float | None = None
-    bars_since_breakdown: int | None = None
-    if breakdown_position is not None:
-        breakdown_close = float(frame["Close"].iloc[breakdown_position])
-        bars_since_breakdown = position - breakdown_position
-    td_below_yellow = close < yellow_mid
-    td_lower_than_breakdown = breakdown_close is not None and close <= breakdown_close
-    post_breakdown_td = bool(
-        breakdown_position is not None
-        and zone_position == "below_band"
-        and td_below_yellow
-        and td_lower_than_breakdown
-    )
+    yellow_trend_confirmed = match_position is not None
     return {
         "available": True,
         "prior_window_bars": min(MOMENTUM_PRIOR_BARS, position),
         "prior_bearish_count": bearish_count,
         "prior_very_bearish_count": very_bearish_count,
         "has_prior_bearish_momentum": bearish_count > 0,
-        "zone_position": zone_position,
-        "breakdown_lookback_bars": BREAKDOWN_LOOKBACK_BARS,
-        "breakdown_bars_ago": bars_since_breakdown,
-        "breakdown_close": round(breakdown_close, 8) if breakdown_close is not None else None,
-        "td_below_yellow": td_below_yellow,
-        "td_lower_than_breakdown": td_lower_than_breakdown,
-        "post_breakdown_td": post_breakdown_td,
-        "bearish_confirmed": bool(bearish_count > 0 and post_breakdown_td),
+        "yellow_lookback_bars": YELLOW_TREND_LOOKBACK_BARS,
+        "yellow_match_bars_ago": position - match_position if match_position is not None else None,
+        "yellow_zone_position": match_zone,
+        "yellow_slope": round(match_slope, 8) if match_slope is not None else None,
+        "yellow_trend_confirmed": yellow_trend_confirmed,
+        "bearish_confirmed": bool(bearish_count > 0 and yellow_trend_confirmed),
     }
 
 
@@ -687,7 +695,7 @@ def collect_signals(
                     "sell_setup": event["sell_setup"],
                     "buy_countdown": event["buy_countdown"],
                     "sell_countdown": event["sell_countdown"],
-                    "momentum": momentum_confirmation(features, frame, position),
+                    "momentum": momentum_confirmation(features, position, str(event["side"])),
                 }
             )
 

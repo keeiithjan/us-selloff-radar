@@ -22,6 +22,8 @@ const elements = {
 };
 
 let sequentialPayload = null;
+let marketUpdatedAt = null;
+let marketAgeTimer = null;
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -41,11 +43,13 @@ function formatCompactCurrency(value) {
 }
 
 function formatMarketPrice(value, currency) {
-  const code = currency === "TWD" ? "TWD" : "USD";
-  return new Intl.NumberFormat(code === "TWD" ? "zh-TW" : "en-US", {
+  const supported = new Set(["USD", "TWD", "JPY", "KRW"]);
+  const code = supported.has(currency) ? currency : "USD";
+  const locales = { TWD: "zh-TW", JPY: "ja-JP", KRW: "ko-KR", USD: "en-US" };
+  return new Intl.NumberFormat(locales[code], {
     style: "currency",
     currency: code,
-    maximumFractionDigits: code === "TWD" ? 0 : 2,
+    maximumFractionDigits: ["TWD", "JPY", "KRW"].includes(code) ? 0 : 2,
   }).format(Number(value));
 }
 
@@ -145,16 +149,66 @@ function renderSelloff(payload) {
   elements.empty.hidden = alerts.length !== 0;
 }
 
-function makeFutureCard(future) {
+function makeSparkline(values, direction) {
+  const points = (Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+  if (points.length < 2) return null;
+
+  const width = 128;
+  const height = 34;
+  const padding = 2;
+  const minimum = Math.min(...points);
+  const maximum = Math.max(...points);
+  const range = maximum - minimum || 1;
+  const coordinates = points.map((value, index) => {
+    const x = (index / (points.length - 1)) * width;
+    const y = height - padding - ((value - minimum) / range) * (height - padding * 2);
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  const namespace = "http://www.w3.org/2000/svg";
+  const wrap = document.createElement("div");
+  wrap.className = `future-sparkline ${direction}`;
+  wrap.title = "當日 1 分鐘走勢";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const area = document.createElementNS(namespace, "polygon");
+  area.setAttribute("class", "sparkline-area");
+  area.setAttribute("points", `0,${height} ${coordinates.join(" ")} ${width},${height}`);
+  const line = document.createElementNS(namespace, "polyline");
+  line.setAttribute("class", "sparkline-line");
+  line.setAttribute("points", coordinates.join(" "));
+  const last = document.createElementNS(namespace, "circle");
+  const [lastX, lastY] = coordinates.at(-1).split(",");
+  last.setAttribute("class", "sparkline-last");
+  last.setAttribute("cx", lastX);
+  last.setAttribute("cy", lastY);
+  last.setAttribute("r", "2.4");
+  svg.append(area, line, last);
+  wrap.append(svg);
+  return wrap;
+}
+
+function makeFutureCard(future, index = 0) {
   const available = !future.unavailable && Number.isFinite(Number(future.last_price));
   const change = Number(future.change_pct || 0);
   const direction = change > 0 ? "up" : change < 0 ? "down" : "flat";
   const card = document.createElement("article");
-  card.className = `future-card ${available ? direction : "unavailable"}`;
+  card.className = `future-card ${available ? direction : "unavailable"} is-fresh`;
+  card.style.setProperty("--card-delay", `${Math.min(index, 8) * 42}ms`);
 
+  const labelRow = document.createElement("div");
+  labelRow.className = "future-label-row";
   const label = document.createElement("p");
   label.className = "future-label";
   label.textContent = future.label || future.ticker;
+  const pulse = document.createElement("span");
+  pulse.className = `quote-pulse ${available ? "live" : ""}`;
+  pulse.setAttribute("aria-label", available ? "報價已載入" : "等待報價");
+  labelRow.append(label, pulse);
   const price = document.createElement("strong");
   price.className = "future-price";
   price.textContent = available ? formatMarketPrice(future.last_price, future.currency) : "—";
@@ -166,11 +220,14 @@ function makeFutureCard(future) {
   const metadata = document.createElement("p");
   metadata.className = "future-meta";
   metadata.textContent = future.fallback_quote
-    ? "期指指數替代報價"
+    ? (future.quote_note || "期指指數替代報價")
     : future.as_of_utc
-      ? `資料時間 · ${formatTaipei(future.as_of_utc)}`
+      ? `${Number(future.quote_interval_minutes || 1)} 分鐘 K · ${formatTaipei(future.as_of_utc)}`
       : "等待下一次更新";
-  card.append(label, price, movement, metadata);
+  const sparkline = makeSparkline(future.sparkline, direction);
+  card.append(labelRow, price, movement);
+  if (sparkline) card.append(sparkline);
+  card.append(metadata);
 
   if (future.tradingview_symbol) {
     const link = document.createElement("a");
@@ -182,6 +239,19 @@ function makeFutureCard(future) {
     card.append(link);
   }
   return card;
+}
+
+function marketAgeText(value) {
+  if (!value || Number.isNaN(new Date(value).getTime())) return "等待下一次更新";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `資料更新 · ${seconds} 秒前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `資料更新 · ${minutes} 分鐘前`;
+  return `資料更新 · ${formatTaipei(value)}`;
+}
+
+function refreshMarketAge() {
+  elements.marketPulseUpdated.textContent = marketAgeText(marketUpdatedAt);
 }
 
 function makePremarketCard(mover) {
@@ -212,9 +282,9 @@ function makePremarketCard(mover) {
 function renderMarketPulse(payload) {
   const futures = Array.isArray(payload.futures) ? payload.futures : [];
   elements.futuresStrip.replaceChildren(...futures.map(makeFutureCard));
-  elements.marketPulseUpdated.textContent = payload.updated_at_utc
-    ? `資料更新 · ${formatTaipei(payload.updated_at_utc)}`
-    : "等待下一次更新";
+  marketUpdatedAt = payload.updated_at_utc || null;
+  refreshMarketAge();
+  if (!marketAgeTimer) marketAgeTimer = window.setInterval(refreshMarketAge, 1_000);
 
   const premarket = payload.premarket || {};
   const movers = Array.isArray(premarket.movers) ? premarket.movers : [];
@@ -266,23 +336,19 @@ function makeSequentialSignal(signal, interval) {
   if (momentum.available) {
     const confirmation = document.createElement("p");
     confirmation.className = `signal-confirmation ${momentum.bearish_confirmed ? "confirmed" : "pending"}`;
-    const zoneText = {
-      below_band: "跌破趨勢帶下方",
-      lower_edge: "位於趨勢帶下緣",
-      not_lower: "未在趨勢帶下緣",
-    }[momentum.zone_position] || "趨勢帶資料不足";
     const priorBars = Number(momentum.prior_window_bars || 0);
     const priorCount = Number(momentum.prior_bearish_count || 0);
-    const breakdownBars = Number(momentum.breakdown_bars_ago);
-    const breakdownText = Number.isFinite(breakdownBars)
-      ? `先前 ${breakdownBars} K 已跌破趨勢帶`
-      : `近 ${Number(momentum.breakdown_lookback_bars || 0)} K 未找到先行跌破`;
-    const tdLocationText = momentum.post_breakdown_td
-      ? "TD 位於黃線與趨勢帶下方"
-      : `${zoneText}・TD 尚未符合右下方位置`;
+    const yellowMatchBars = Number(momentum.yellow_match_bars_ago);
+    const yellowZoneText = {
+      below_ribbon: "黃線在趨勢帶下方",
+      lower_edge: "黃線位於趨勢帶下緣",
+    }[momentum.yellow_zone_position] || "黃線資料不足";
+    const yellowText = Number.isFinite(yellowMatchBars)
+      ? `${yellowZoneText}且斜率向下（${yellowMatchBars} K 前）`
+      : `近 ${Number(momentum.yellow_lookback_bars || 30)} K 黃線未同時在趨勢帶下緣／下方且斜率向下`;
     confirmation.textContent = momentum.bearish_confirmed
-      ? `空方動能確認：符合｜前 ${priorBars} K 空方動能 ${priorCount} 次・${breakdownText}・${tdLocationText}`
-      : `空方動能確認：未完整符合｜前 ${priorBars} K 空方動能 ${priorCount} 次・${breakdownText}・${tdLocationText}`;
+      ? `空方動能確認：符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`
+      : `空方動能確認：未完整符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`;
     card.append(top, labels, confirmation, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
   } else {
     card.append(top, labels, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+import numpy as np
 import yfinance as yf
 
 from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, load_symbols
@@ -48,6 +49,12 @@ FUTURES = (
     FutureSpec("dow", "道瓊期貨", ("YM=F",), "USD", "CBOT_MINI:YM1!"),
     FutureSpec("sox", "SOX 期貨", ("SOX=F",), "USD", "CME_MINI:SOX1!"),
     FutureSpec("russell", "Russell 2000 期貨", ("RTY=F",), "USD", "CME_MINI:RTY1!"),
+    # NKD is the USD-denominated CME Nikkei contract. It gives the dashboard
+    # an overnight Asia reference while the US market is closed.
+    FutureSpec("japan", "日經 225 期貨", ("NKD=F",), "USD", "CME:NKD1!"),
+    # Yahoo does not consistently expose KRX's continuous contract. Try a
+    # futures identifier first; otherwise label KOSPI 200 spot as a proxy.
+    FutureSpec("korea", "南韓 KOSPI 200 期貨", ("KOSPI200=F", "KOSPI200.KS"), "KRW", "KRX:K2I1!"),
 )
 
 # Large, liquid names that commonly lead broad US index, technology,
@@ -108,11 +115,17 @@ def clean_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def download_future(ticker: str) -> pd.DataFrame:
+    """Load one-minute futures bars for the pulse and its intraday sparkline.
+
+    GitHub Actions still publishes on its five-minute schedule, but taking the
+    most recent one-minute bar makes each published quote as current as that
+    schedule permits.
+    """
     try:
         raw = yf.download(
             ticker,
             period="5d",
-            interval="5m",
+            interval="1m",
             auto_adjust=False,
             prepost=True,
             progress=False,
@@ -126,6 +139,18 @@ def download_future(ticker: str) -> pd.DataFrame:
     if isinstance(raw.columns, pd.MultiIndex):
         raw = frame_for_symbol(raw, ticker, 1)
     return clean_frame(raw)
+
+
+def compact_intraday_closes(frame: pd.DataFrame, latest_time: pd.Timestamp, maximum: int = 72) -> list[float]:
+    """Return a small, current-session close series safe to ship to the browser."""
+    current_session = frame.loc[pd.Index(frame.index.date) == latest_time.date(), "Close"].dropna()
+    if current_session.empty:
+        return []
+    values = current_session.astype(float).to_numpy()
+    if len(values) > maximum:
+        positions = np.linspace(0, len(values) - 1, maximum, dtype=int)
+        values = values[positions]
+    return [round(float(value), 4) for value in values]
 
 
 def future_quote(spec: FutureSpec) -> dict[str, object]:
@@ -154,7 +179,10 @@ def future_quote(spec: FutureSpec) -> dict[str, object]:
             "change": round(change, 4),
             "change_pct": round(change_pct, 3),
             "as_of_utc": latest_time.isoformat(),
+            "sparkline": compact_intraday_closes(frame, latest_time),
+            "quote_interval_minutes": 1,
             "fallback_quote": index > 0,
+            "quote_note": "KOSPI 200 現貨指數替代報價" if spec.key == "korea" and index > 0 else "",
             "tradingview_symbol": spec.tradingview_symbol,
         }
     return {
