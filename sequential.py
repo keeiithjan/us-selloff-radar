@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import numpy as np
 import yfinance as yf
 
 from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_session, load_symbols
@@ -54,6 +55,19 @@ TIMEFRAMES = (
     Timeframe("1h", "1 小時", "1h", "1y", "60", timedelta(hours=1)),
     Timeframe("1d", "日線", "1d", "2y", "D", None),
 )
+
+# AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
+# non-repainting rational-quadratic zones used for the 15-minute and hourly
+# TD confirmation.  The five preceding bars deliberately exclude the TD bar.
+MOMENTUM_TIMEFRAME_KEYS = {"15m", "1h"}
+KERNEL_LOOKBACK = 8
+KERNEL_RELATIVE_WEIGHT = 8.0
+KERNEL_START_BAR = 25
+ZONE_INSIDE_LENGTH = 50
+ZONE_OUTSIDE_LENGTH = 75
+MOMENTUM_SMOOTHING_LENGTH = 14
+MOMENTUM_PRIOR_BARS = 5
+YELLOW_SLOPE_BARS = 3
 
 
 @dataclass(frozen=True)
@@ -279,9 +293,11 @@ def _download_binance_frame(symbol: str, timeframe: Timeframe) -> pd.DataFrame:
         values.append(
             {
                 "time": pd.to_datetime(int(row[0]), unit="ms", utc=True),
+                "Open": float(row[1]),
                 "Close": float(row[4]),
                 "High": float(row[2]),
                 "Low": float(row[3]),
+                "Volume": float(row[5]),
             }
         )
     if not values:
@@ -318,7 +334,9 @@ def confirmed_bars(
     """Keep market-session bars that were completed by ``now``."""
     if raw.empty:
         return raw
-    frame = raw[["Close", "High", "Low"]].copy().sort_index()
+    columns = ["Close", "High", "Low"]
+    columns.extend(column for column in ("Open", "Volume") if column in raw.columns)
+    frame = raw[columns].copy().sort_index()
     index = pd.DatetimeIndex(frame.index)
     now_local = now.astimezone(session.timezone)
 
@@ -432,6 +450,140 @@ def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
     return state, signal_labels(state)
 
 
+def rational_quadratic(source: pd.Series) -> pd.Series:
+    """Non-repainting Rational Quadratic estimate used by KernelFunctions v2.
+
+    The Pine library sums the current bar through ``lookback + startBar``.
+    Using a fixed backward-only window preserves that non-repainting behavior.
+    """
+    values = pd.to_numeric(source, errors="coerce").to_numpy(dtype=float)
+    length = len(values)
+    max_lag = KERNEL_LOOKBACK + KERNEL_START_BAR
+    lags = np.arange(max_lag + 1, dtype=float)
+    weights = np.power(
+        1 + (np.square(lags) / (KERNEL_LOOKBACK**2 * 2 * KERNEL_RELATIVE_WEIGHT)),
+        -KERNEL_RELATIVE_WEIGHT,
+    )
+    numerator = np.convolve(values, weights, mode="full")[:length]
+    missing = np.convolve(
+        np.isnan(values).astype(float), np.ones(len(weights)), mode="full"
+    )[:length]
+    estimate = numerator / weights.sum()
+    estimate[:max_lag] = np.nan
+    estimate[missing > 0] = np.nan
+    return pd.Series(estimate, index=source.index, dtype=float)
+
+
+def wilder_rsi(close: pd.Series, length: int) -> pd.Series:
+    """Wilder RSI, matching the RSI input used by the supplied indicator."""
+    change = close.diff()
+    gain = change.clip(lower=0)
+    loss = (-change.clip(upper=0))
+    average_gain = gain.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    average_loss = loss.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    relative_strength = average_gain / average_loss.replace(0, np.nan)
+    result = 100 - (100 / (1 + relative_strength))
+    return result.where(average_loss != 0, 100.0)
+
+
+def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Calculate the bearish parts of the supplied AI Momentum indicator.
+
+    ``yellow_mid`` is the source indicator's yellow line.  ``lower_inside``
+    and ``lower_outside`` are the inner and outer lower trend-band boundaries.
+    """
+    columns = ["yellow_mid", "lower_inside", "lower_outside", "bearish_bar", "very_bearish"]
+    if not {"Open", "High", "Low", "Close", "Volume"}.issubset(frame.columns):
+        return pd.DataFrame(index=frame.index, columns=columns)
+
+    open_price = pd.to_numeric(frame["Open"], errors="coerce")
+    high = pd.to_numeric(frame["High"], errors="coerce")
+    low = pd.to_numeric(frame["Low"], errors="coerce")
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    volume = pd.to_numeric(frame["Volume"], errors="coerce")
+    ohlc4 = (open_price + high + low + close) / 4
+    rolling_volume = volume.rolling(MOMENTUM_SMOOTHING_LENGTH, min_periods=MOMENTUM_SMOOTHING_LENGTH).sum()
+    vwma = (
+        (ohlc4 * volume).rolling(MOMENTUM_SMOOTHING_LENGTH, min_periods=MOMENTUM_SMOOTHING_LENGTH).sum()
+        / rolling_volume.replace(0, np.nan)
+    )
+
+    upper_inside = rational_quadratic(
+        high.rolling(ZONE_INSIDE_LENGTH, min_periods=ZONE_INSIDE_LENGTH).max()
+    )
+    lower_inside = rational_quadratic(
+        low.rolling(ZONE_INSIDE_LENGTH, min_periods=ZONE_INSIDE_LENGTH).min()
+    )
+    lower_outside = rational_quadratic(
+        low.rolling(ZONE_OUTSIDE_LENGTH, min_periods=ZONE_OUTSIDE_LENGTH).min()
+    )
+    yellow_mid = (upper_inside + lower_inside) / 2
+    kernel_close = rational_quadratic(close)
+    minimum_vwma = vwma.rolling(MOMENTUM_SMOOTHING_LENGTH, min_periods=MOMENTUM_SMOOTHING_LENGTH).min()
+    bearish_bar = kernel_close < rational_quadratic(minimum_vwma)
+    very_bearish = bearish_bar & (rational_quadratic(wilder_rsi(close, MOMENTUM_SMOOTHING_LENGTH)) <= 43)
+
+    return pd.DataFrame(
+        {
+            "yellow_mid": yellow_mid,
+            "lower_inside": lower_inside,
+            "lower_outside": lower_outside,
+            "bearish_bar": bearish_bar.fillna(False),
+            "very_bearish": very_bearish.fillna(False),
+        },
+        index=frame.index,
+    )
+
+
+def momentum_confirmation(features: pd.DataFrame | None, frame: pd.DataFrame, position: int) -> dict[str, object]:
+    """Describe AI Momentum conditions immediately preceding one TD signal."""
+    if features is None or position >= len(features):
+        return {"available": False}
+
+    values = features.iloc[position]
+    yellow_mid = float(values["yellow_mid"])
+    lower_inside = float(values["lower_inside"])
+    lower_outside = float(values["lower_outside"])
+    if not all(np.isfinite(value) for value in (yellow_mid, lower_inside, lower_outside)):
+        return {"available": False}
+
+    prior_start = max(0, position - MOMENTUM_PRIOR_BARS)
+    prior = features.iloc[prior_start:position]
+    bearish_count = int(prior["bearish_bar"].fillna(False).astype(bool).sum())
+    very_bearish_count = int(prior["very_bearish"].fillna(False).astype(bool).sum())
+    slope_from = position - YELLOW_SLOPE_BARS
+    slope_down = False
+    slope_pct: float | None = None
+    if slope_from >= 0:
+        prior_mid = float(features["yellow_mid"].iloc[slope_from])
+        if np.isfinite(prior_mid) and prior_mid != 0:
+            slope_pct = round(((yellow_mid / prior_mid) - 1) * 100, 3)
+            slope_down = yellow_mid < prior_mid
+
+    close = float(frame["Close"].iloc[position])
+    if close < lower_outside:
+        zone_position = "below_band"
+    elif close <= lower_inside:
+        zone_position = "lower_edge"
+    else:
+        zone_position = "not_lower"
+
+    structure_confirmed = slope_down and zone_position in {"below_band", "lower_edge"}
+    return {
+        "available": True,
+        "prior_window_bars": min(MOMENTUM_PRIOR_BARS, position),
+        "prior_bearish_count": bearish_count,
+        "prior_very_bearish_count": very_bearish_count,
+        "has_prior_bearish_momentum": bearish_count > 0,
+        "yellow_slope": "down" if slope_down else "flat_or_up",
+        "yellow_slope_bars": YELLOW_SLOPE_BARS,
+        "yellow_slope_pct": slope_pct,
+        "zone_position": zone_position,
+        "structure_confirmed": structure_confirmed,
+        "bearish_confirmed": bool(bearish_count > 0 and structure_confirmed),
+    }
+
+
 def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSession) -> str:
     timestamp = pd.Timestamp(index_value)
     if timestamp.tzinfo is None:
@@ -482,11 +634,18 @@ def collect_signals(
         recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "5"))
         if recent_bars < 1 or recent_bars > 20:
             raise ValueError("RECENT_SIGNAL_BARS 必須介於 1 到 20")
-        for event in events:
+        recent_events = [
+            event for event in events
+            if len(frame) - 1 - int(event["position"]) < recent_bars
+        ]
+        features = (
+            ai_momentum_features(frame)
+            if recent_events and timeframe.key in MOMENTUM_TIMEFRAME_KEYS
+            else None
+        )
+        for event in recent_events:
             position = int(event["position"])
             age_bars = len(frame) - 1 - position
-            if age_bars >= recent_bars:
-                continue
             signals.append(
                 {
                 "symbol": instrument.symbol,
@@ -504,6 +663,7 @@ def collect_signals(
                     "sell_setup": event["sell_setup"],
                     "buy_countdown": event["buy_countdown"],
                     "sell_countdown": event["sell_countdown"],
+                    "momentum": momentum_confirmation(features, frame, position),
                 }
             )
 

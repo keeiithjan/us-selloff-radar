@@ -13,6 +13,7 @@ const elements = {
   sequentialMarket: document.querySelector("#sequential-market"),
   sequentialSort: document.querySelector("#sequential-sort"),
   sequentialSide: document.querySelector("#sequential-side"),
+  sequentialMomentum: document.querySelector("#sequential-momentum"),
 };
 
 let sequentialPayload = null;
@@ -149,18 +150,38 @@ function makeSequentialSignal(signal, interval) {
     badge.textContent = label;
     labels.append(badge);
   }
-  card.append(top, labels, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
+  const momentum = signal.momentum || {};
+  if (momentum.available) {
+    const confirmation = document.createElement("p");
+    confirmation.className = `signal-confirmation ${momentum.bearish_confirmed ? "confirmed" : "pending"}`;
+    const zoneText = {
+      below_band: "跌破趨勢帶下方",
+      lower_edge: "位於趨勢帶下緣",
+      not_lower: "未在趨勢帶下緣",
+    }[momentum.zone_position] || "趨勢帶資料不足";
+    const slopeText = momentum.yellow_slope === "down" ? "黃線向下" : "黃線未向下";
+    const priorBars = Number(momentum.prior_window_bars || 0);
+    const priorCount = Number(momentum.prior_bearish_count || 0);
+    confirmation.textContent = momentum.bearish_confirmed
+      ? `空方動能確認：符合｜前 ${priorBars} K 空方動能 ${priorCount} 次・${slopeText}・${zoneText}`
+      : `空方動能確認：未完整符合｜前 ${priorBars} K 空方動能 ${priorCount} 次・${slopeText}・${zoneText}`;
+    card.append(top, labels, confirmation, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
+  } else {
+    card.append(top, labels, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
+  }
   return card;
 }
 
 function filteredSignals(frame) {
   const selectedMarket = elements.sequentialMarket.value;
   const selectedSide = elements.sequentialSide.value;
+  const selectedMomentum = elements.sequentialMomentum.value;
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
   const signals = Array.isArray(frame.signals) ? frame.signals : [];
   return signals
     .filter((signal) => selectedMarket === "all" || signal.market === selectedMarket)
     .filter((signal) => selectedSide === "all" || signal.side === selectedSide)
+    .filter((signal) => selectedMomentum === "all" || Boolean(signal.momentum && signal.momentum.bearish_confirmed))
     .sort((left, right) => {
       const leftTime = Date.parse(left.occurred_at_utc || 0);
       const rightTime = Date.parse(right.occurred_at_utc || 0);
@@ -251,6 +272,9 @@ elements.sequentialSort.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 elements.sequentialSide.addEventListener("change", () => {
+  if (sequentialPayload) renderSequential(sequentialPayload);
+});
+elements.sequentialMomentum.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 refresh();

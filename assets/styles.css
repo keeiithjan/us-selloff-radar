@@ -196,6 +196,9 @@ h2 { margin-bottom: 8px; font-size: 1.28rem; letter-spacing: -.025em; }
 .signal-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
 .signal-labels span { padding: 4px 7px; border-radius: 999px; background: var(--accent-soft); color: #256c56; font-size: .7rem; font-weight: 800; }
 .sequential-signal.sell .signal-labels span { background: var(--danger-soft); color: #a64d42; }
+.signal-confirmation { margin: 0 0 12px; font-size: .75rem; font-weight: 750; line-height: 1.55; }
+.signal-confirmation.confirmed { color: #176148; }
+.signal-confirmation.pending { color: var(--muted); }
 .sequential-signal .tv-link { padding: 9px 10px; font-size: .8rem; }
 
 footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--line); font-size: .77rem; }
