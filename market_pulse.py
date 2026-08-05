@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from datetime import datetime, time as clock_time, timezone
 from pathlib import Path
@@ -30,6 +31,10 @@ UTC = timezone.utc
 PREMARKET_OPEN = clock_time(4, 0)
 REGULAR_OPEN = clock_time(9, 30)
 REGULAR_CLOSE = clock_time(16, 0)
+BINANCE_AMD_SYMBOL = "AMDUSDT"
+BINANCE_AMD_TICKER_URL = (
+    "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=" + BINANCE_AMD_SYMBOL
+)
 
 
 @dataclass(frozen=True)
@@ -275,6 +280,88 @@ def premarket_mover(
     }
 
 
+def latest_regular_close(raw_frame: pd.DataFrame, now: datetime) -> float | None:
+    """Return AMD's latest completed US regular-session close when available."""
+    if raw_frame.empty:
+        return None
+    frame = raw_frame.copy()
+    frame.index = pd.DatetimeIndex(frame.index).tz_convert(NEW_YORK)
+    local_now = now.astimezone(NEW_YORK)
+    is_after_regular_close = local_now.time() >= REGULAR_CLOSE
+    dates = frame.index.date
+    # The regular session starts at 09:30, not the 04:00 extended-hours open.
+    regular = frame.loc[
+        (frame.index.time >= REGULAR_OPEN)
+        & (frame.index.time < REGULAR_CLOSE)
+        & (frame.index <= local_now)
+        & ((dates < local_now.date()) | (is_after_regular_close & (dates == local_now.date())))
+    ]
+    if regular.empty:
+        return None
+    close = float(regular["Close"].iloc[-1])
+    return close if close > 0 else None
+
+
+def download_binance_amd_ticker() -> dict[str, object] | None:
+    """Read the free public Binance USDⓈ-M AMD stock-perpetual quote."""
+    request = Request(BINANCE_AMD_TICKER_URL, headers={"User-Agent": "us-selloff-radar/1.0"})
+    try:
+        with urlopen(request, timeout=12) as response:  # nosec B310 - fixed Binance HTTPS endpoint
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        logging.warning("Binance %s quote failed: %s", BINANCE_AMD_SYMBOL, exc)
+        return None
+    if payload.get("symbol") != BINANCE_AMD_SYMBOL:
+        return None
+    return payload
+
+
+def binance_amd_mover(
+    raw_frame: pd.DataFrame, now: datetime, threshold_pct: float
+) -> dict[str, object] | None:
+    """Add AMDUSDT outside normal US hours, measured against the cash close.
+
+    AMDUSDT is a Binance TradFi perpetual contract, not NASDAQ AMD stock.  We
+    use the most recent completed regular-session AMD close when Yahoo makes it
+    available; otherwise the Binance rolling-24-hour open is labelled clearly.
+    """
+    quote = download_binance_amd_ticker()
+    if not quote:
+        return None
+    try:
+        last_price = float(quote["lastPrice"])
+        fallback_baseline = float(quote["openPrice"])
+        as_of = pd.Timestamp(int(quote["closeTime"]), unit="ms", tz=UTC)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if last_price <= 0 or fallback_baseline <= 0:
+        return None
+
+    previous_close = latest_regular_close(raw_frame, now)
+    reference_label = "AMD 最近一般盤收盤"
+    if previous_close is None:
+        previous_close = fallback_baseline
+        reference_label = "Binance 24 小時開盤"
+    change_pct = (last_price / previous_close - 1) * 100
+    if abs(change_pct) < threshold_pct:
+        return None
+    return {
+        "symbol": BINANCE_AMD_SYMBOL,
+        "exchange": "BINANCE USDⓈ-M",
+        "industry": "AMD 股票永續合約（非現股）",
+        "last_price": round(last_price, 4),
+        "previous_close": round(previous_close, 4),
+        "reference_label": reference_label,
+        "change": round(last_price - previous_close, 4),
+        "change_pct": round(change_pct, 3),
+        "direction": "up" if change_pct > 0 else "down",
+        "bar_time_et": as_of.tz_convert(NEW_YORK).strftime("%Y-%m-%d %H:%M ET"),
+        "occurred_at_utc": as_of.isoformat(),
+        "tradingview_symbol": "BINANCE:AMDUSDT.P",
+        "source": "Binance USDⓈ-M public API",
+    }
+
+
 def selected_premarket_symbols(all_symbols: Iterable[Symbol]) -> list[Symbol]:
     lookup = {item.ticker: item for item in all_symbols}
     return [
@@ -318,9 +405,12 @@ def main() -> None:
         movers = [
             result
             for item in symbols
+            if item.ticker != "AMD"
             if (result := premarket_mover(item, frames.get(item.ticker, pd.DataFrame()), now, threshold_pct))
             is not None
         ]
+        if (amd_mover := binance_amd_mover(frames.get("AMD", pd.DataFrame()), now, threshold_pct)):
+            movers.append(amd_mover)
     except Exception as exc:
         logging.warning("Pre-market scan failed: %s", exc)
         symbols, frames, movers = [], {}, []
@@ -337,6 +427,7 @@ def main() -> None:
             "futures": futures,
             "premarket": {
                 "active": premarket_active,
+                "binance_amd_enabled": True,
                 "threshold_pct": threshold_pct,
                 "scanned_symbols": len(frames),
                 "movers": movers[:max_movers],

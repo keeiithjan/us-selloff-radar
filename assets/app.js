@@ -85,7 +85,8 @@ function makeStat(label, value) {
 function tradingViewUrl(item, interval) {
   const symbol = String(item.symbol || "").replace(/[^A-Z0-9.-]/g, "");
   const exchange = String(item.exchange || "NASDAQ").replace(/[^A-Z]/g, "");
-  const query = new URLSearchParams({ symbol: `${exchange}:${symbol}` });
+  const chartSymbol = item.tradingview_symbol || `${exchange}:${symbol}`;
+  const query = new URLSearchParams({ symbol: chartSymbol });
   if (interval) query.set("interval", interval);
   return `https://www.tradingview.com/chart/?${query.toString()}`;
 }
@@ -274,7 +275,8 @@ function makePremarketCard(mover) {
 
   const details = document.createElement("p");
   details.className = "premarket-details";
-  details.textContent = `盤前 ${formatMarketPrice(mover.last_price, "USD")}｜昨收 ${formatMarketPrice(mover.previous_close, "USD")}`;
+  const reference = mover.reference_label || "昨收";
+  details.textContent = `最新 ${formatMarketPrice(mover.last_price, "USD")}｜${reference} ${formatMarketPrice(mover.previous_close, "USD")}`;
   card.append(top, details, makeTradingViewLink(mover, "5", "在 TradingView 檢視"));
   return card;
 }
@@ -292,6 +294,9 @@ function renderMarketPulse(payload) {
   elements.premarketSummary.textContent = premarket.active
     ? `美東盤前中 · 已掃描 ${Number(premarket.scanned_symbols || 0)} 檔 · 異常門檻 ±${threshold}%`
     : "僅於美東 04:00–09:30 掃描";
+  if (premarket.binance_amd_enabled) {
+    elements.premarketSummary.textContent += "｜AMDUSDT 夜盤合約持續監控";
+  }
   elements.premarketMovers.replaceChildren(...movers.map(makePremarketCard));
   elements.premarketEmpty.hidden = movers.length !== 0;
   if (movers.length === 0) {
