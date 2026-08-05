@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#07111f">
-    <title>美股急跌雷達</title>
+    <title>美股急跌與 Sequential 雷達</title>
     <link rel="stylesheet" href="assets/styles.css">
   </head>
   <body>
@@ -13,46 +13,59 @@
         <div>
           <p class="eyebrow">US EQUITY MONITOR</p>
           <h1>美股急跌雷達</h1>
-          <p class="lede">30 分鐘急跌 × 5 分鐘爆量，手機可直接查看 TradingView 圖表。</p>
+          <p class="lede">30 分鐘急跌爆量監控，加上 Sequential 7／8／9／13 的 15 分鐘、1 小時與日線訊號；可直接開啟 TradingView。</p>
         </div>
-        <button id="refresh" class="refresh" type="button">重新整理</button>
+        <button id="refresh" class="refresh" type="button">更新畫面</button>
       </header>
 
-      <section class="status-grid" aria-label="監控狀態">
+      <section class="status-grid" aria-label="掃描狀態">
         <article class="metric">
           <span>市場狀態</span>
-          <strong id="market-status">讀取中</strong>
+          <strong id="market-status">載入中</strong>
         </article>
         <article class="metric">
-          <span>符合條件</span>
+          <span>急跌警示</span>
           <strong id="alert-count">—</strong>
         </article>
         <article class="metric">
-          <span>最後更新（台北）</span>
+          <span>最後更新（台北時間）</span>
           <strong id="updated-at">—</strong>
         </article>
       </section>
 
       <section class="rules">
-        <h2>預設規則</h2>
-        <p>30 分鐘跌幅 ≤ -3%、最新 5 分鐘成交量 ≥ 前 20 根中位數 3 倍、價格 ≥ USD 5，且日均成交額 ≥ USD 20M。</p>
+        <h2>急跌條件</h2>
+        <p>30 分鐘跌幅 ≤ -3%，最新 5 分鐘成交量 ≥ 前 20 根中位數的 3 倍，且最低價格 USD 5、近 4 個完整交易日平均成交額 ≥ USD 20M。</p>
       </section>
 
       <section class="monitor">
         <div class="section-heading">
           <div>
             <p class="eyebrow">CURRENT CANDIDATES</p>
-            <h2>目前警示</h2>
+            <h2>急跌爆量標的</h2>
           </div>
           <p id="scan-coverage" class="muted"></p>
         </div>
         <div id="alerts" class="alerts" aria-live="polite"></div>
-        <p id="empty" class="empty" hidden>目前沒有符合條件的標的。</p>
+        <p id="empty" class="empty" hidden>目前沒有符合急跌爆量條件的標的。</p>
+      </section>
+
+      <section class="sequential-monitor" aria-labelledby="sequential-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MULTI-TIMEFRAME SEQUENTIAL</p>
+            <h2 id="sequential-title">Sequential 7／8／9／13 監測</h2>
+          </div>
+          <p id="sequential-updated" class="muted"></p>
+        </div>
+        <p class="sequential-note">買方 Setup：收盤低於 4 根前收盤；賣方 Setup：收盤高於 4 根前收盤。Setup 9 會啟動非連續的 Countdown 13；僅採用已完成 K 棒，避免盤中計數變動。</p>
+        <div id="sequential-frames" class="sequential-frames" aria-live="polite"></div>
+        <p id="sequential-source" class="sequential-source"></p>
       </section>
 
       <footer>
         <p id="source-note"></p>
-        <p>此頁僅供研究與監控，不是即時報價、投資建議或下單訊號。</p>
+        <p>資料僅供研究與監控，不是投資建議或買賣訊號。下單前請自行核實即時報價、公司行動與市場狀況。</p>
       </footer>
     </main>
     <script src="assets/app.js"></script>

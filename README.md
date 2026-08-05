@@ -2,6 +2,26 @@
 
 這個專案是手機友善的靜態網頁應用程式。GitHub Actions 每 5 分鐘執行一次掃描；GitHub Pages 發布最新結果。每張警示卡都能直接打開對應的 TradingView 圖表。
 
+除了急跌爆量掃描，首頁也提供 **Sequential 7／8／9／13 多週期監測**，依使用者提供的 quantifytools Pine Script 規則，顯示目前最後一根已完成 K 棒上的訊號：
+
+| 週期 | Yahoo 資料週期 | TradingView 開啟週期 |
+| --- | --- | --- |
+| 15 分鐘 | 15m | 15 分鐘 |
+| 1 小時 | 1h | 60 分鐘 |
+| 日線 | 1d | 日線 |
+
+這個模組只顯示目前已完成 K 棒的 Setup 7、8、9 或 Countdown 13。沒有卡片不代表沒有歷史訊號，而是最新已完成的一根 K 棒沒有上述計數。
+
+## Sequential 計算方式
+
+- **買方 Setup**：收盤價低於 4 根 K 棒前的收盤價，連續計數；第 9 根重新從 1 開始。
+- **賣方 Setup**：收盤價高於 4 根 K 棒前的收盤價，連續計數；第 9 根重新從 1 開始。
+- Setup 9 啟動對應方向的 Countdown 13。買方條件為收盤低於 2 根前低點；賣方條件為收盤高於 2 根前高點，Countdown 不要求連續。
+- 相反方向的 Setup 9、同向的新 Setup 9，或突破／跌破已完成 Setup 的界線時，會依原 Pine Script 的邏輯重設或失效 Countdown。
+- 盤中尚未收完的 15 分鐘、1 小時、日線 K 棒不計入，避免網頁數字在該根 K 棒內反覆改變。
+
+本模組是依使用者提供的 **Discreet sequential counts (7, 8, 9, 13)** Pine Script 邏輯重製；原作者為 quantifytools，原始程式碼採 Mozilla Public License 2.0。
+
 ## 監控條件
 
 警示必須同時符合：

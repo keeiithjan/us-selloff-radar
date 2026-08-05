@@ -36,6 +36,9 @@ jobs:
       - name: Refresh alert data
         run: python scanner.py
 
+      - name: Refresh Sequential multi-timeframe data
+        run: python sequential.py
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 

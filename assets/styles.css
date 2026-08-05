@@ -87,6 +87,50 @@ h2 { margin-bottom: 8px; font-size: 1.2rem; }
 .section-heading { align-items: end; }
 .section-heading h2 { margin-bottom: 0; }
 
+.sequential-monitor { margin-top: 42px; }
+.sequential-note,
+.sequential-source { color: var(--muted); font-size: .88rem; line-height: 1.6; }
+.sequential-note { margin: 14px 0 0; }
+.sequential-source { margin: 16px 0 0; }
+
+.sequential-frames {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.timeframe {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--card-edge);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+}
+
+.timeframe-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.timeframe h3 { margin: 0; font-size: 1.08rem; }
+.timeframe-header span { color: var(--accent); font-size: .74rem; font-weight: 800; white-space: nowrap; }
+.timeframe-meta { margin: 9px 0 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
+.timeframe-empty { margin: 14px 0 0; padding: 13px; border-radius: 10px; background: #0b192a; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+
+.sequential-signals { display: grid; gap: 10px; margin-top: 14px; }
+.sequential-signal { padding: 12px; border: 1px solid var(--card-edge); border-radius: 12px; background: #0b192a; }
+.sequential-signal.buy { border-color: #176b62; }
+.sequential-signal.sell { border-color: #82404a; }
+.sequential-signal h4 { margin: 0; font-size: 1rem; }
+.signal-price { color: var(--ink); font-size: .9rem; white-space: nowrap; }
+.signal-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
+.signal-labels span { padding: 4px 7px; border-radius: 999px; background: var(--accent-deep); color: var(--accent); font-size: .72rem; font-weight: 800; }
+.sequential-signal.sell .signal-labels span { background: var(--danger-deep); color: #ffb1bd; }
+.sequential-signal .tv-link { padding: 9px 10px; font-size: .82rem; }
+
 .alerts {
   display: grid;
   gap: 12px;
@@ -130,5 +174,6 @@ footer p { margin-bottom: 8px; }
   .status-grid { grid-template-columns: 1fr; }
   .metric { min-height: auto; }
   .stats { grid-template-columns: 1fr; }
+  .sequential-frames { grid-template-columns: 1fr; }
   .alert-top { align-items: start; }
 }

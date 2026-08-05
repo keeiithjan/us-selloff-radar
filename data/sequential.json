@@ -1,0 +1,31 @@
+{
+  "updated_at_utc": null,
+  "market_status": "closed",
+  "source": "首次部署後，GitHub Actions 會更新 Sequential 多週期監測資料。",
+  "timeframes": [
+    {
+      "key": "15m",
+      "label": "15 分鐘",
+      "tradingview_interval": "15",
+      "scanned_symbols": 0,
+      "last_completed_bar_et": null,
+      "signals": []
+    },
+    {
+      "key": "1h",
+      "label": "1 小時",
+      "tradingview_interval": "60",
+      "scanned_symbols": 0,
+      "last_completed_bar_et": null,
+      "signals": []
+    },
+    {
+      "key": "1d",
+      "label": "日線",
+      "tradingview_interval": "D",
+      "scanned_symbols": 0,
+      "last_completed_bar_et": null,
+      "signals": []
+    }
+  ]
+}
