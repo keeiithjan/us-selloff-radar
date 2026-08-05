@@ -67,7 +67,7 @@ ZONE_INSIDE_LENGTH = 50
 ZONE_OUTSIDE_LENGTH = 75
 MOMENTUM_SMOOTHING_LENGTH = 14
 MOMENTUM_PRIOR_BARS = 5
-YELLOW_SLOPE_BARS = 3
+BREAKDOWN_LOOKBACK_BARS = 60
 
 
 @dataclass(frozen=True)
@@ -536,7 +536,13 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def momentum_confirmation(features: pd.DataFrame | None, frame: pd.DataFrame, position: int) -> dict[str, object]:
-    """Describe AI Momentum conditions immediately preceding one TD signal."""
+    """Confirm that TD appears after a completed lower-band breakdown.
+
+    A valid signal must be to the right of an earlier close below the outer
+    lower band, still be below that band, and close no higher than the actual
+    breakdown bar.  This prevents a TD mark inside or above the band from
+    being described as a bearish continuation.
+    """
     if features is None or position >= len(features):
         return {"available": False}
 
@@ -551,15 +557,6 @@ def momentum_confirmation(features: pd.DataFrame | None, frame: pd.DataFrame, po
     prior = features.iloc[prior_start:position]
     bearish_count = int(prior["bearish_bar"].fillna(False).astype(bool).sum())
     very_bearish_count = int(prior["very_bearish"].fillna(False).astype(bool).sum())
-    slope_from = position - YELLOW_SLOPE_BARS
-    slope_down = False
-    slope_pct: float | None = None
-    if slope_from >= 0:
-        prior_mid = float(features["yellow_mid"].iloc[slope_from])
-        if np.isfinite(prior_mid) and prior_mid != 0:
-            slope_pct = round(((yellow_mid / prior_mid) - 1) * 100, 3)
-            slope_down = yellow_mid < prior_mid
-
     close = float(frame["Close"].iloc[position])
     if close < lower_outside:
         zone_position = "below_band"
@@ -568,19 +565,46 @@ def momentum_confirmation(features: pd.DataFrame | None, frame: pd.DataFrame, po
     else:
         zone_position = "not_lower"
 
-    structure_confirmed = slope_down and zone_position in {"below_band", "lower_edge"}
+    search_start = max(1, position - BREAKDOWN_LOOKBACK_BARS)
+    breakdown_position: int | None = None
+    for candidate in range(position - 1, search_start - 1, -1):
+        prior_close = float(frame["Close"].iloc[candidate - 1])
+        candidate_close = float(frame["Close"].iloc[candidate])
+        candidate_lower = float(features["lower_outside"].iloc[candidate])
+        prior_lower = float(features["lower_outside"].iloc[candidate - 1])
+        if not all(np.isfinite(value) for value in (prior_close, candidate_close, candidate_lower, prior_lower)):
+            continue
+        if prior_close >= prior_lower and candidate_close < candidate_lower:
+            breakdown_position = candidate
+            break
+
+    breakdown_close: float | None = None
+    bars_since_breakdown: int | None = None
+    if breakdown_position is not None:
+        breakdown_close = float(frame["Close"].iloc[breakdown_position])
+        bars_since_breakdown = position - breakdown_position
+    td_below_yellow = close < yellow_mid
+    td_lower_than_breakdown = breakdown_close is not None and close <= breakdown_close
+    post_breakdown_td = bool(
+        breakdown_position is not None
+        and zone_position == "below_band"
+        and td_below_yellow
+        and td_lower_than_breakdown
+    )
     return {
         "available": True,
         "prior_window_bars": min(MOMENTUM_PRIOR_BARS, position),
         "prior_bearish_count": bearish_count,
         "prior_very_bearish_count": very_bearish_count,
         "has_prior_bearish_momentum": bearish_count > 0,
-        "yellow_slope": "down" if slope_down else "flat_or_up",
-        "yellow_slope_bars": YELLOW_SLOPE_BARS,
-        "yellow_slope_pct": slope_pct,
         "zone_position": zone_position,
-        "structure_confirmed": structure_confirmed,
-        "bearish_confirmed": bool(bearish_count > 0 and structure_confirmed),
+        "breakdown_lookback_bars": BREAKDOWN_LOOKBACK_BARS,
+        "breakdown_bars_ago": bars_since_breakdown,
+        "breakdown_close": round(breakdown_close, 8) if breakdown_close is not None else None,
+        "td_below_yellow": td_below_yellow,
+        "td_lower_than_breakdown": td_lower_than_breakdown,
+        "post_breakdown_td": post_breakdown_td,
+        "bearish_confirmed": bool(bearish_count > 0 and post_breakdown_td),
     }
 
 
