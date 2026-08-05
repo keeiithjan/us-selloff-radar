@@ -1,4 +1,4 @@
-# 美股急跌雷達：GitHub Pages 版
+# KJ Radar System：GitHub Pages 版
 
 這個專案是手機友善的靜態網頁應用程式。GitHub Actions 每 5 分鐘執行一次掃描；GitHub Pages 發布最新結果。每張警示卡都能直接打開對應的 TradingView 圖表。
 

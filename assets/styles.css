@@ -10,21 +10,30 @@
   --accent-soft: #e7f2eb;
   --danger: #b24e42;
   --danger-soft: #fff0ed;
+  --electric: #13a58d;
+  --electric-soft: rgb(19 165 141 / 14%);
+  --signal-line: rgb(19 165 141 / 18%);
   --shadow: 0 12px 28px rgb(30 43 36 / 5%);
 }
 
 * { box-sizing: border-box; }
 
 body {
+  position: relative;
   margin: 0;
   min-width: 320px;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 88% -12%, rgb(19 165 141 / 10%), transparent 28rem),
+    linear-gradient(90deg, rgb(19 165 141 / 3%) 1px, transparent 1px),
+    linear-gradient(rgb(19 165 141 / 3%) 1px, transparent 1px),
+    var(--bg);
+  background-size: auto, 30px 30px, 30px 30px, auto;
   color: var(--ink);
   font-family: Inter, "Noto Sans TC", "PingFang TC", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-.shell { width: min(100% - 48px, 1120px); margin: 0 auto; padding: 54px 0 68px; }
+.shell { position: relative; width: min(100% - 48px, 1120px); margin: 0 auto; padding: 54px 0 68px; }
 
 .hero,
 .section-heading {
@@ -50,6 +59,7 @@ body {
 
 .future-card {
   position: relative;
+  isolation: isolate;
   min-width: 0;
   padding: 15px;
   overflow: hidden;
@@ -58,14 +68,19 @@ body {
   background: var(--surface);
   transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
 }
+.future-card > *,
+.premarket-card > *,
+.alert-card > * { position: relative; z-index: 1; }
 
 .future-card.up { background: linear-gradient(150deg, #fff 62%, #edf8f1); }
 .future-card.down { background: linear-gradient(150deg, #fff 62%, #fff1ed); }
 .future-card:hover { border-color: #c4d1c9; box-shadow: var(--shadow); transform: translateY(-2px); }
-.future-card.is-fresh { animation: future-card-arrive .42s both; animation-delay: var(--card-delay, 0ms); }
+.future-card.is-fresh,
+.premarket-card.is-fresh,
+.alert-card.is-fresh { animation: future-card-arrive .56s cubic-bezier(.2, .8, .2, 1) both; animation-delay: var(--card-delay, 0ms); }
 
 @keyframes future-card-arrive {
-  from { opacity: 0; transform: translateY(7px); }
+  from { opacity: 0; filter: blur(3px); transform: translateY(11px) scale(.985); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -93,11 +108,18 @@ body {
   background: #b8c0ba;
 }
 .quote-pulse.live { background: var(--accent); animation: quote-pulse 1.6s ease-in-out infinite; }
+.quote-pulse.live.down { background: var(--danger); animation-name: quote-pulse-down; }
 @keyframes quote-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(35 115 92 / 0%); opacity: .65; }
   50% { box-shadow: 0 0 0 5px rgb(35 115 92 / 16%); opacity: 1; }
 }
-.future-price { display: block; margin-top: 9px; overflow: hidden; font-size: clamp(.95rem, 1.7vw, 1.14rem); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; animation: future-value-pop .55s ease-out both; animation-delay: var(--card-delay, 0ms); }
+.quote-pulse.live.down { box-shadow: 0 0 0 0 rgb(178 78 66 / 0%); }
+@keyframes quote-pulse-down {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(178 78 66 / 0%); opacity: .65; }
+  50% { box-shadow: 0 0 0 5px rgb(178 78 66 / 16%); opacity: 1; }
+}
+.future-price { display: block; margin-top: 9px; overflow: hidden; font-size: clamp(.95rem, 1.7vw, 1.14rem); letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
+.future-card.is-fresh .future-price { animation: future-value-pop .55s ease-out both; animation-delay: var(--card-delay, 0ms); }
 @keyframes future-value-pop {
   from { filter: blur(2px); opacity: .25; transform: translateY(2px); }
   to { filter: blur(0); opacity: 1; transform: translateY(0); }
@@ -116,9 +138,64 @@ body {
 .future-sparkline.down .sparkline-area { fill: rgb(178 78 66 / 11%); }
 .future-sparkline.down .sparkline-line { stroke: var(--danger); }
 .future-sparkline.down .sparkline-last { fill: var(--danger); }
+.future-sparkline.is-drawing .sparkline-line { stroke-dasharray: 180; animation: sparkline-trace .9s cubic-bezier(.2, .75, .25, 1) both; }
+@keyframes sparkline-trace { from { stroke-dashoffset: 180; opacity: .15; } to { stroke-dashoffset: 0; opacity: 1; } }
 .future-meta { min-height: 1.3em; margin: 9px 0 0; color: var(--muted); font-size: .67rem; line-height: 1.35; }
 .future-link { display: inline-block; margin-top: 10px; color: var(--ink); font-size: .72rem; font-weight: 800; text-decoration-color: #aab4ac; text-underline-offset: 3px; }
 .future-link:hover { color: var(--accent); }
+
+.matrix-number {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+.matrix-number.is-ticking { animation: matrix-flicker .13s steps(2, end) 5; }
+@keyframes matrix-flicker {
+  0%, 100% { filter: none; text-shadow: none; }
+  50% { filter: contrast(1.25); text-shadow: 1px 0 0 rgb(19 165 141 / 42%), -1px 0 0 rgb(178 78 66 / 28%); }
+}
+
+.future-card.is-updated::after,
+.premarket-card.is-updated::after,
+.alert-card.is-updated::after {
+  position: absolute;
+  z-index: 0;
+  top: -45%;
+  left: -22%;
+  width: 44%;
+  height: 190%;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--electric-soft), transparent);
+  transform: skewX(-20deg);
+  animation: data-scan .82s cubic-bezier(.2, .7, .3, 1) both;
+}
+
+.future-card.down.is-updated::after,
+.premarket-card.down.is-updated::after { background: linear-gradient(90deg, transparent, rgb(178 78 66 / 14%), transparent); }
+@keyframes data-scan { from { opacity: 0; transform: translateX(-10%) skewX(-20deg); } 25% { opacity: 1; } to { opacity: 0; transform: translateX(330%) skewX(-20deg); } }
+
+.future-card.is-new .future-label::after,
+.premarket-card.is-new .ticker::after,
+.alert-card.is-new .ticker::after {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  margin-left: 7px;
+  padding: 0 5px;
+  border: 1px solid var(--electric);
+  border-radius: 3px;
+  color: #096c5b;
+  content: "NEW";
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .56rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  vertical-align: middle;
+  animation: new-signal .9s ease-out both;
+}
+@keyframes new-signal { 0% { background: var(--electric); color: #fff; transform: scale(.75); } 65% { background: var(--electric-soft); } 100% { background: transparent; transform: scale(1); } }
 
 .premarket-heading {
   display: flex;
@@ -132,7 +209,7 @@ body {
 .premarket-heading .eyebrow { margin-bottom: 7px; }
 .premarket-heading .muted { margin: 0; text-align: right; font-size: .8rem; }
 .premarket-movers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 17px; }
-.premarket-card { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.premarket-card { position: relative; isolation: isolate; padding: 15px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
 .premarket-card.up { border-top: 3px solid var(--accent); }
 .premarket-card.down { border-top: 3px solid var(--danger); }
 .premarket-card .ticker { font-size: 1.05rem; }
@@ -214,7 +291,7 @@ h2 { margin-bottom: 8px; font-size: 1.28rem; letter-spacing: -.025em; }
 .section-heading .muted { margin-bottom: 0; text-align: right; font-size: .84rem; }
 
 .alerts { display: grid; gap: 12px; margin-top: 18px; }
-.alert-card { padding: 19px; box-shadow: var(--shadow); }
+.alert-card { position: relative; isolation: isolate; padding: 19px; overflow: hidden; box-shadow: var(--shadow); }
 .alert-top,
 .row { display: flex; justify-content: space-between; gap: 16px; }
 
@@ -335,6 +412,16 @@ footer p { margin-bottom: 8px; }
 @media (prefers-reduced-motion: reduce) {
   .quote-pulse.live,
   .future-card.is-fresh,
-  .future-price { animation: none; }
+  .premarket-card.is-fresh,
+  .alert-card.is-fresh,
+  .future-card.is-fresh .future-price,
+  .future-sparkline.is-drawing .sparkline-line,
+  .matrix-number.is-ticking,
+  .future-card.is-updated::after,
+  .premarket-card.is-updated::after,
+  .alert-card.is-updated::after,
+  .future-card.is-new .future-label::after,
+  .premarket-card.is-new .ticker::after,
+  .alert-card.is-new .ticker::after { animation: none; }
   .future-card:hover { transform: none; }
 }

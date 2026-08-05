@@ -24,6 +24,15 @@ const elements = {
 let sequentialPayload = null;
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const motionState = {
+  alerts: new Map(),
+  futures: new Map(),
+  movers: new Map(),
+  alertCount: null,
+  hasAlerts: false,
+  hasMarket: false,
+};
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -57,6 +66,57 @@ function formatSigned(value, digits = 2) {
   const number = Number(value);
   const sign = number > 0 ? "+" : "";
   return `${sign}${number.toFixed(digits)}`;
+}
+
+function numberChanged(previous, next) {
+  const before = Number(previous);
+  const after = Number(next);
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return false;
+  return Math.abs(before - after) > Math.max(0.000001, Math.abs(after) * 0.0000001);
+}
+
+function quoteMotion(previous, item, initial) {
+  if (!previous) return { enter: true, isNew: !initial, isUpdated: false };
+  return {
+    enter: numberChanged(previous.last_price, item.last_price) || numberChanged(previous.change_pct, item.change_pct),
+    isNew: false,
+    isUpdated: numberChanged(previous.last_price, item.last_price) || numberChanged(previous.change_pct, item.change_pct),
+  };
+}
+
+function quoteSnapshot(items, key) {
+  return new Map(items.map((item) => [String(item[key] || ""), item]));
+}
+
+function animateNumber(node, from, to, formatter) {
+  const startValue = Number(from);
+  const endValue = Number(to);
+  if (
+    reducedMotion.matches ||
+    !Number.isFinite(startValue) ||
+    !Number.isFinite(endValue) ||
+    !numberChanged(startValue, endValue)
+  ) {
+    node.textContent = formatter(endValue);
+    return;
+  }
+  const startedAt = performance.now();
+  const duration = 680;
+  node.classList.add("is-ticking");
+  const tick = (now) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - (1 - progress) ** 3;
+    const distance = Math.abs(endValue - startValue) || Math.max(Math.abs(endValue) * 0.012, 0.01);
+    const flicker = progress < 0.82 ? Math.sin(progress * 48) * distance * (1 - progress) * 0.18 : 0;
+    node.textContent = formatter(startValue + (endValue - startValue) * eased + flicker);
+    if (progress < 1) {
+      window.requestAnimationFrame(tick);
+    } else {
+      node.textContent = formatter(endValue);
+      node.classList.remove("is-ticking");
+    }
+  };
+  window.requestAnimationFrame(tick);
 }
 
 function formatTaipei(value) {
@@ -107,9 +167,9 @@ function makeTradingViewLink(item, interval, label = "在 TradingView 開啟圖�
   return link;
 }
 
-function makeAlertCard(alert) {
+function makeAlertCard(alert, motion = {}) {
   const card = document.createElement("article");
-  card.className = "alert-card";
+  card.className = `alert-card${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
 
   const top = document.createElement("div");
   top.className = "alert-top";
@@ -122,8 +182,11 @@ function makeAlertCard(alert) {
   exchange.textContent = [alert.exchange, alert.industry, alert.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, exchange);
   const drop = document.createElement("div");
-  drop.className = "drop";
+  drop.className = "drop matrix-number";
   drop.textContent = `${Number(alert.price_change_pct).toFixed(2)}%`;
+  if (motion.isUpdated) {
+    animateNumber(drop, motion.previous.price_change_pct, alert.price_change_pct, (value) => `${value.toFixed(2)}%`);
+  }
   top.append(name, drop);
 
   const stats = document.createElement("div");
@@ -142,15 +205,30 @@ function renderSelloff(payload) {
   const open = payload.market_status === "open";
   elements.status.textContent = open ? "美股一般盤中" : "美股一般盤外";
   elements.status.style.color = open ? "var(--accent)" : "var(--muted)";
-  elements.count.textContent = String(alerts.length);
+  const priorCount = motionState.alertCount;
+  elements.count.classList.add("matrix-number");
+  if (motionState.hasAlerts && Number.isFinite(priorCount)) {
+    animateNumber(elements.count, priorCount, alerts.length, (value) => String(Math.round(value)));
+  } else {
+    elements.count.textContent = String(alerts.length);
+  }
   elements.updated.textContent = payload.updated_at_utc ? formatTaipei(payload.updated_at_utc) : "—";
   elements.coverage.textContent = `已掃描 ${String(payload.scanned_symbols || 0)} 檔`;
   elements.source.textContent = payload.source || "";
-  elements.alerts.replaceChildren(...alerts.map(makeAlertCard));
+  elements.alerts.replaceChildren(
+    ...alerts.map((alert) => {
+      const previous = motionState.alerts.get(alert.symbol);
+      const motion = { ...quoteMotion(previous, alert, !motionState.hasAlerts), previous };
+      return makeAlertCard(alert, motion);
+    })
+  );
   elements.empty.hidden = alerts.length !== 0;
+  motionState.alerts = quoteSnapshot(alerts, "symbol");
+  motionState.alertCount = alerts.length;
+  motionState.hasAlerts = true;
 }
 
-function makeSparkline(values, direction) {
+function makeSparkline(values, direction, animate = false) {
   const points = (Array.isArray(values) ? values : [])
     .map(Number)
     .filter((value) => Number.isFinite(value));
@@ -170,7 +248,7 @@ function makeSparkline(values, direction) {
 
   const namespace = "http://www.w3.org/2000/svg";
   const wrap = document.createElement("div");
-  wrap.className = `future-sparkline ${direction}`;
+  wrap.className = `future-sparkline ${direction}${animate ? " is-drawing" : ""}`;
   wrap.title = "當日 1 分鐘走勢";
   const svg = document.createElementNS(namespace, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -193,12 +271,12 @@ function makeSparkline(values, direction) {
   return wrap;
 }
 
-function makeFutureCard(future, index = 0) {
+function makeFutureCard(future, index = 0, motion = {}) {
   const available = !future.unavailable && Number.isFinite(Number(future.last_price));
   const change = Number(future.change_pct || 0);
   const direction = change > 0 ? "up" : change < 0 ? "down" : "flat";
   const card = document.createElement("article");
-  card.className = `future-card ${available ? direction : "unavailable"} is-fresh`;
+  card.className = `future-card ${available ? direction : "unavailable"}${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
   card.style.setProperty("--card-delay", `${Math.min(index, 8) * 42}ms`);
 
   const labelRow = document.createElement("div");
@@ -207,12 +285,20 @@ function makeFutureCard(future, index = 0) {
   label.className = "future-label";
   label.textContent = future.label || future.ticker;
   const pulse = document.createElement("span");
-  pulse.className = `quote-pulse ${available ? "live" : ""}`;
+  pulse.className = `quote-pulse ${available ? `live ${direction}` : ""}`;
   pulse.setAttribute("aria-label", available ? "報價已載入" : "等待報價");
   labelRow.append(label, pulse);
   const price = document.createElement("strong");
-  price.className = "future-price";
+  price.className = "future-price matrix-number";
   price.textContent = available ? formatMarketPrice(future.last_price, future.currency) : "—";
+  if (available && motion.isUpdated) {
+    animateNumber(
+      price,
+      motion.previous.last_price,
+      future.last_price,
+      (value) => formatMarketPrice(value, future.currency)
+    );
+  }
   const movement = document.createElement("p");
   movement.className = "future-movement";
   movement.textContent = available
@@ -225,7 +311,7 @@ function makeFutureCard(future, index = 0) {
     : future.as_of_utc
       ? `${Number(future.quote_interval_minutes || 1)} 分鐘 K · ${formatTaipei(future.as_of_utc)}`
       : "等待下一次更新";
-  const sparkline = makeSparkline(future.sparkline, direction);
+  const sparkline = makeSparkline(future.sparkline, direction, motion.enter);
   card.append(labelRow, price, movement);
   if (sparkline) card.append(sparkline);
   card.append(metadata);
@@ -255,9 +341,9 @@ function refreshMarketAge() {
   elements.marketPulseUpdated.textContent = marketAgeText(marketUpdatedAt);
 }
 
-function makePremarketCard(mover) {
+function makePremarketCard(mover, motion = {}) {
   const card = document.createElement("article");
-  card.className = `premarket-card ${mover.direction === "up" ? "up" : "down"}`;
+  card.className = `premarket-card ${mover.direction === "up" ? "up" : "down"}${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
   const top = document.createElement("div");
   top.className = "alert-top";
   const name = document.createElement("div");
@@ -269,8 +355,11 @@ function makePremarketCard(mover) {
   industry.textContent = [mover.exchange, mover.industry, mover.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, industry);
   const change = document.createElement("strong");
-  change.className = "premarket-change";
+  change.className = "premarket-change matrix-number";
   change.textContent = `${formatSigned(mover.change_pct)}%`;
+  if (motion.isUpdated) {
+    animateNumber(change, motion.previous.change_pct, mover.change_pct, (value) => `${formatSigned(value)}%`);
+  }
   top.append(name, change);
 
   const details = document.createElement("p");
@@ -283,7 +372,13 @@ function makePremarketCard(mover) {
 
 function renderMarketPulse(payload) {
   const futures = Array.isArray(payload.futures) ? payload.futures : [];
-  elements.futuresStrip.replaceChildren(...futures.map(makeFutureCard));
+  elements.futuresStrip.replaceChildren(
+    ...futures.map((future, index) => {
+      const previous = motionState.futures.get(future.key);
+      const motion = { ...quoteMotion(previous, future, !motionState.hasMarket), previous };
+      return makeFutureCard(future, index, motion);
+    })
+  );
   marketUpdatedAt = payload.updated_at_utc || null;
   refreshMarketAge();
   if (!marketAgeTimer) marketAgeTimer = window.setInterval(refreshMarketAge, 1_000);
@@ -298,13 +393,22 @@ function renderMarketPulse(payload) {
   if (premarket.binance_equity_enabled && binanceCount > 0) {
     elements.premarketSummary.textContent += `｜Binance 股票 USDT 合約監控 ${binanceCount} 檔`;
   }
-  elements.premarketMovers.replaceChildren(...movers.map(makePremarketCard));
+  elements.premarketMovers.replaceChildren(
+    ...movers.map((mover) => {
+      const previous = motionState.movers.get(mover.symbol);
+      const motion = { ...quoteMotion(previous, mover, !motionState.hasMarket), previous };
+      return makePremarketCard(mover, motion);
+    })
+  );
   elements.premarketEmpty.hidden = movers.length !== 0;
   if (movers.length === 0) {
     elements.premarketEmpty.textContent = premarket.active
       ? `目前沒有指標股達到 ±${threshold}% 的盤前異常門檻。`
       : "目前非美股盤前時段；下一個盤前時段會自動更新。";
   }
+  motionState.futures = quoteSnapshot(futures, "key");
+  motionState.movers = quoteSnapshot(movers, "symbol");
+  motionState.hasMarket = true;
 }
 
 function makeSequentialSignal(signal, interval) {
