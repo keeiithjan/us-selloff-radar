@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build multi-timeframe Sequential 7/8/9/13 monitor data for GitHub Pages.
+"""Build multi-market Sequential 7/8/9/13 data for GitHub Pages.
 
-This reproduces the supplied Pine Script's close-vs-four-bars-ago setup,
-9-to-13 countdown, opposite-setup reset, and completed-setup invalidation
-rules.  It only evaluates confirmed bars, so an in-progress candle cannot
-change a published count.
+The Sequential logic reproduces the supplied Pine Script's close-vs-four-bars-
+ago setup, 9-to-13 countdown, opposite-setup reset, and completed-setup
+invalidation rules. It only evaluates confirmed candles.
 
 Based on "Discreet sequential counts (7, 8, 9, 13)" by quantifytools,
 provided by the user under the Mozilla Public License 2.0.
@@ -14,10 +13,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, time as clock_time, timedelta, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -28,6 +33,10 @@ from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_sessi
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
 SYMBOLS_FILE = ROOT / "symbols.csv"
+TAIPEI = ZoneInfo("Asia/Taipei")
+UTC = timezone.utc
+TAIFEX_STOCK_FUTURES_URL = "https://www.taifex.com.tw/cht/5/stockMargining"
+BINANCE_DATA_URL = "https://data-api.binance.vision/api/v3"
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,27 @@ TIMEFRAMES = (
     Timeframe("1h", "1 小時", "1h", "1y", "60", timedelta(hours=1)),
     Timeframe("1d", "日線", "1d", "2y", "D", None),
 )
+
+
+@dataclass(frozen=True)
+class MarketSession:
+    timezone: timezone | ZoneInfo
+    session_open: clock_time | None = None
+    session_close: clock_time | None = None
+
+
+US_SESSION = MarketSession(NEW_YORK, clock_time(9, 30), clock_time(16, 0))
+TW_SESSION = MarketSession(TAIPEI, clock_time(9, 0), clock_time(13, 30))
+CRYPTO_SESSION = MarketSession(UTC)
+
+
+@dataclass(frozen=True)
+class Instrument:
+    ticker: str
+    symbol: str
+    exchange: str
+    market: str
+    session: MarketSession
 
 
 @dataclass
@@ -65,10 +95,82 @@ class SequentialState:
             self.sell_setup_lows = []
 
 
+class HtmlTables(HTMLParser):
+    """Tiny dependency-free HTML table reader for the TAIFEX public table."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._table: list[list[str]] | None = None
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "table":
+            self._table = []
+        elif tag == "tr" and self._table is not None:
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._cell is not None:
+            self._row.append(" ".join(self._cell).strip())
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._row:
+                self._table.append(self._row)
+            self._row = None
+        elif tag == "table" and self._table is not None:
+            self.tables.append(self._table)
+            self._table = None
+
+
+def _http_json(path: str) -> object:
+    request = Request(
+        f"{BINANCE_DATA_URL}{path}", headers={"User-Agent": "us-selloff-radar/1.0"}
+    )
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def fetch_taifex_stock_futures() -> list[str]:
+    """Read the official, current stock-futures underlying list from TAIFEX.
+
+    The first table is ordinary-share stock futures. ETF futures are a separate
+    table and intentionally excluded from this "個股期貨" monitor. Mini and
+    standard contracts on the same underlying are deduplicated.
+    """
+    request = Request(TAIFEX_STOCK_FUTURES_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(request, timeout=30) as response:
+        page = response.read().decode("utf-8", errors="replace")
+    parser = HtmlTables()
+    parser.feed(page)
+    if not parser.tables or len(parser.tables[0]) < 2:
+        raise RuntimeError("無法讀取台灣期交所股票期貨標的清單")
+
+    codes: list[str] = []
+    seen: set[str] = set()
+    for row in parser.tables[0][1:]:
+        if len(row) < 3:
+            continue
+        code = row[2].strip().upper()
+        if re.fullmatch(r"\d{4,6}[A-Z]?", code) and code not in seen:
+            codes.append(code)
+            seen.add(code)
+    if len(codes) < 100:
+        raise RuntimeError(f"台灣期交所清單格式異常，僅取得 {len(codes)} 檔")
+    return codes
+
+
 def download_timeframe(
     symbols: list[Symbol], timeframe: Timeframe, batch_size: int = 100
 ) -> dict[str, pd.DataFrame]:
-    """Download all requested symbols in batches for one timeframe."""
+    """Download one Yahoo Finance timeframe in batches."""
     frames: dict[str, pd.DataFrame] = {}
     for batch in chunks(symbols, batch_size):
         tickers = [item.ticker for item in batch]
@@ -91,43 +193,153 @@ def download_timeframe(
 
         for ticker in tickers:
             frame = frame_for_symbol(response, ticker, len(tickers))
-            if {"Close", "High", "Low"}.issubset(frame.columns):
-                frames[ticker] = frame.dropna(subset=["Close", "High", "Low"]).copy()
+            if not {"Close", "High", "Low"}.issubset(frame.columns):
+                continue
+            clean = frame.dropna(subset=["Close", "High", "Low"]).copy()
+            if not clean.empty:
+                frames[ticker] = clean
     return frames
 
 
-def confirmed_regular_bars(
-    raw: pd.DataFrame, timeframe: Timeframe, now: datetime
+def download_yahoo_records(
+    instruments: list[Instrument], timeframe: Timeframe
+) -> list[tuple[Instrument, pd.DataFrame]]:
+    symbols = [Symbol(item.ticker, item.exchange) for item in instruments]
+    frames = download_timeframe(symbols, timeframe)
+    return [(item, frames[item.ticker]) for item in instruments if item.ticker in frames]
+
+
+def download_taiwan_records(
+    codes: list[str], timeframe: Timeframe
+) -> list[tuple[Instrument, pd.DataFrame]]:
+    """Resolve .TW first, then .TWO for individual-futures underlyings."""
+    primary = [
+        Instrument(f"{code}.TW", code, "TWSE", "台股個股期貨標的", TW_SESSION)
+        for code in codes
+    ]
+    primary_records = download_yahoo_records(primary, timeframe)
+    found = {item.symbol for item, _ in primary_records}
+    fallback = [
+        Instrument(f"{code}.TWO", code, "TPEX", "台股個股期貨標的", TW_SESSION)
+        for code in codes
+        if code not in found
+    ]
+    return primary_records + download_yahoo_records(fallback, timeframe)
+
+
+def fetch_binance_instruments() -> list[Instrument]:
+    """Select the most liquid Binance Spot USDT pairs, excluding stable coins."""
+    configured = int(os.getenv("BINANCE_TOP_USDT_PAIRS", "40"))
+    if configured < 1 or configured > 100:
+        raise ValueError("BINANCE_TOP_USDT_PAIRS 必須介於 1 到 100")
+    rows = _http_json("/ticker/24hr")
+    if not isinstance(rows, list):
+        raise RuntimeError("無法取得幣安 24 小時成交資料")
+
+    stable_bases = {
+        "USDT", "USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD", "GUSD", "LUSD",
+        "FRAX", "USDD", "USDE", "USDS", "USD1", "PYUSD", "RLUSD", "DUSD", "EUR", "TRY",
+    }
+    leveraged_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+    selected: list[tuple[float, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol", "")).upper()
+        base = symbol.removesuffix("USDT")
+        if (
+            not symbol.endswith("USDT")
+            or not re.fullmatch(r"[A-Z0-9]+USDT", symbol)
+            or base in stable_bases
+            or symbol.endswith(leveraged_suffixes)
+        ):
+            continue
+        try:
+            volume = float(row.get("quoteVolume", 0))
+        except (TypeError, ValueError):
+            continue
+        if volume > 0:
+            selected.append((volume, symbol))
+    selected.sort(reverse=True)
+    return [
+        Instrument(symbol, symbol, "BINANCE", "幣安現貨", CRYPTO_SESSION)
+        for _, symbol in selected[:configured]
+    ]
+
+
+def _download_binance_frame(symbol: str, timeframe: Timeframe) -> pd.DataFrame:
+    rows = _http_json(f"/klines?symbol={symbol}&interval={timeframe.key}&limit=120")
+    if not isinstance(rows, list) or not rows:
+        return pd.DataFrame()
+    values = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) < 7:
+            continue
+        values.append(
+            {
+                "time": pd.to_datetime(int(row[0]), unit="ms", utc=True),
+                "Close": float(row[4]),
+                "High": float(row[2]),
+                "Low": float(row[3]),
+            }
+        )
+    if not values:
+        return pd.DataFrame()
+    frame = pd.DataFrame(values).set_index("time").sort_index()
+    return frame
+
+
+def download_binance_records(
+    instruments: list[Instrument], timeframe: Timeframe
+) -> list[tuple[Instrument, pd.DataFrame]]:
+    records: list[tuple[Instrument, pd.DataFrame]] = []
+    workers = min(8, max(1, len(instruments)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_download_binance_frame, item.ticker, timeframe): item
+            for item in instruments
+        }
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                frame = future.result()
+            except Exception as exc:
+                logging.warning("幣安 %s %s 下載失敗：%s", item.ticker, timeframe.label, exc)
+                continue
+            if not frame.empty:
+                records.append((item, frame))
+    return records
+
+
+def confirmed_bars(
+    raw: pd.DataFrame, timeframe: Timeframe, session: MarketSession, now: datetime
 ) -> pd.DataFrame:
-    """Keep regular-session bars that have completed by ``now`` in New York."""
+    """Keep market-session bars that were completed by ``now``."""
     if raw.empty:
         return raw
-
     frame = raw[["Close", "High", "Low"]].copy().sort_index()
     index = pd.DatetimeIndex(frame.index)
-    now_et = now.astimezone(NEW_YORK)
+    now_local = now.astimezone(session.timezone)
 
     if timeframe.duration is None:
-        # Yahoo daily timestamps are date labels.  Today's daily candle is only
-        # confirmed at the regular-session close; prior dates are always safe.
         if index.tz is not None:
-            index = index.tz_convert(NEW_YORK).tz_localize(None)
+            index = index.tz_convert(session.timezone).tz_localize(None)
         frame.index = index
-        today = now_et.date()
-        if now_et.weekday() < 5 and now_et.time() < clock_time(16, 0):
-            return frame.loc[frame.index.date < today]
-        return frame.loc[frame.index.date <= today]
+        if session.session_close is None:
+            return frame.loc[frame.index.date < now_local.date()]
+        completed_today = now_local.time() >= session.session_close
+        mask = frame.index.date <= now_local.date() if completed_today else frame.index.date < now_local.date()
+        return frame.loc[mask]
 
     if index.tz is None:
         index = index.tz_localize("UTC")
-    frame.index = index.tz_convert(NEW_YORK)
-    frame = frame.loc[
-        (frame.index.time >= clock_time(9, 30))
-        & (frame.index.time < clock_time(16, 0))
-    ]
-    if frame.empty:
-        return frame
-    return frame.loc[frame.index + timeframe.duration <= now_et]
+    frame.index = index.tz_convert(session.timezone)
+    if session.session_open is not None and session.session_close is not None:
+        frame = frame.loc[
+            (frame.index.time >= session.session_open)
+            & (frame.index.time < session.session_close)
+        ]
+    return frame.loc[frame.index + timeframe.duration <= now_local]
 
 
 def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
@@ -142,53 +354,35 @@ def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
 
     for position in range(4, len(frame)):
         current_close = close[position]
-
-        # Sequential setup counts: close relative to the close four bars ago.
-        state.buy_setup = (
-            1 if state.buy_setup == 9 else state.buy_setup + 1
-        ) if current_close < close[position - 4] else 0
-        state.sell_setup = (
-            1 if state.sell_setup == 9 else state.sell_setup + 1
-        ) if current_close > close[position - 4] else 0
-
+        state.buy_setup = (1 if state.buy_setup == 9 else state.buy_setup + 1) if current_close < close[position - 4] else 0
+        state.sell_setup = (1 if state.sell_setup == 9 else state.sell_setup + 1) if current_close > close[position - 4] else 0
         prior_buy_countdown = state.buy_countdown
         prior_sell_countdown = state.sell_countdown
 
-        # Buy setup 9 enables a buy countdown and cancels the sell countdown.
         if state.buy_setup == 9:
             state.buy_enabled = True
             state.buy_countdown = 0
             state.sell_enabled = False
             state.sell_countdown = 0
             state.buy_setup_highs.extend(high[position - 8 : position + 1])
-
-        # Countdown test is exactly close < low[2].
-        if state.buy_enabled and position >= 2 and current_close < low[position - 2]:
+        if state.buy_enabled and current_close < low[position - 2]:
             state.buy_countdown += 1
-
-        # Pine checks the prior bar's count, so 13 is visible for one bar.
         if prior_buy_countdown == 13:
             state.buy_enabled = False
             state.buy_countdown = 0
 
-        # Sell setup 9 enables a sell countdown and cancels the buy countdown.
         if state.sell_setup == 9:
             state.sell_enabled = True
             state.sell_countdown = 0
             state.buy_enabled = False
             state.buy_countdown = 0
             state.sell_setup_lows.extend(low[position - 8 : position + 1])
-
-        # Countdown test is exactly close > high[2].
-        if state.sell_enabled and position >= 2 and current_close > high[position - 2]:
+        if state.sell_enabled and current_close > high[position - 2]:
             state.sell_countdown += 1
-
         if prior_sell_countdown == 13:
             state.sell_enabled = False
             state.sell_countdown = 0
 
-        # The Pine script retains completed-setup highs/lows while that
-        # countdown stays active, then invalidates on a breakout/breakdown.
         if state.buy_enabled and state.buy_setup_highs and current_close > max(state.buy_setup_highs):
             state.buy_enabled = False
             state.buy_countdown = 0
@@ -212,13 +406,15 @@ def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
     return state, labels
 
 
-def format_bar_time(index_value: object, timeframe: Timeframe) -> str:
+def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSession) -> str:
     timestamp = pd.Timestamp(index_value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(session.timezone)
+    timestamp = timestamp.tz_convert(session.timezone)
     if timeframe.duration is None:
         return timestamp.strftime("%Y-%m-%d 日線")
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize(NEW_YORK)
-    return timestamp.tz_convert(NEW_YORK).strftime("%Y-%m-%d %H:%M ET")
+    zone_name = "台北" if session.timezone == TAIPEI else "ET" if session.timezone == NEW_YORK else "UTC"
+    return timestamp.strftime(f"%Y-%m-%d %H:%M {zone_name}")
 
 
 def signal_side(labels: list[str]) -> str:
@@ -230,27 +426,35 @@ def signal_side(labels: list[str]) -> str:
 
 
 def collect_signals(
-    symbols: list[Symbol], timeframe: Timeframe, now: datetime
+    us_instruments: list[Instrument],
+    taiwan_codes: list[str],
+    binance_instruments: list[Instrument],
+    timeframe: Timeframe,
+    now: datetime,
 ) -> dict[str, object]:
-    frames = download_timeframe(symbols, timeframe)
-    exchanges = {item.ticker: item.exchange for item in symbols}
+    records = download_yahoo_records(us_instruments, timeframe)
+    records.extend(download_taiwan_records(taiwan_codes, timeframe))
+    records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
-    latest_completed: list[pd.Timestamp] = []
+    scanned_by_market: dict[str, int] = {}
+    latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
-    for ticker, raw in frames.items():
-        frame = confirmed_regular_bars(raw, timeframe, now)
+    for instrument, raw in records:
+        frame = confirmed_bars(raw, timeframe, instrument.session, now)
         if len(frame) < 13:
             continue
+        scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
         state, labels = sequential_state(frame)
-        latest_completed.append(pd.Timestamp(frame.index[-1]))
+        latest_completed.append((pd.Timestamp(frame.index[-1]), instrument.session))
         if not labels:
             continue
         signals.append(
             {
-                "symbol": ticker,
-                "exchange": exchanges[ticker],
-                "bar_time_et": format_bar_time(frame.index[-1], timeframe),
-                "last_price": round(float(frame["Close"].iloc[-1]), 2),
+                "symbol": instrument.symbol,
+                "exchange": instrument.exchange,
+                "market": instrument.market,
+                "bar_time_et": format_bar_time(frame.index[-1], timeframe, instrument.session),
+                "last_price": round(float(frame["Close"].iloc[-1]), 8),
                 "labels": labels,
                 "side": signal_side(labels),
                 "buy_setup": state.buy_setup,
@@ -260,23 +464,29 @@ def collect_signals(
             }
         )
 
-    signals.sort(key=lambda item: (item["symbol"], item["labels"]))
-    latest = max(latest_completed) if latest_completed else None
+    signals.sort(key=lambda item: (str(item["market"]), str(item["symbol"]), item["labels"]))
     return {
         "key": timeframe.key,
         "label": timeframe.label,
         "tradingview_interval": timeframe.tradingview_interval,
-        "scanned_symbols": len(frames),
-        "last_completed_bar_et": format_bar_time(latest, timeframe) if latest is not None else None,
+        "scanned_symbols": sum(scanned_by_market.values()),
+        "scanned_by_market": scanned_by_market,
+        "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
     }
 
 
-def write_payload(frames: Iterable[dict[str, object]], now: datetime) -> None:
+def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: list[str]) -> None:
+    source = (
+        "美股與台股資料：Yahoo Finance via yfinance；台股個股期貨清單：台灣期交所公開資料；"
+        "幣安：24 小時成交額最高的 USDT 現貨交易對（預設前 40 檔）與公開 K 線。"
+    )
+    if errors:
+        source += " 本次部分來源未更新：" + "；".join(errors)
     payload = {
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "market_status": "open" if is_regular_session(now) else "closed",
-        "source": "Yahoo Finance via yfinance；已完成 K 棒；依 quantifytools Pine Script 的 Sequential 計數規則重製。研究監控用途，不構成投資建議。",
+        "source": source,
         "timeframes": list(frames),
     }
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
@@ -286,9 +496,29 @@ def write_payload(frames: Iterable[dict[str, object]], now: datetime) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     now = datetime.now(NEW_YORK)
-    symbols = load_symbols(SYMBOLS_FILE)
-    frames = [collect_signals(symbols, timeframe, now) for timeframe in TIMEFRAMES]
-    write_payload(frames, now)
+    errors: list[str] = []
+    us_instruments = [
+        Instrument(item.ticker, item.ticker, item.exchange, "美股", US_SESSION)
+        for item in load_symbols(SYMBOLS_FILE)
+    ]
+    try:
+        taiwan_codes = fetch_taifex_stock_futures()
+    except Exception as exc:
+        logging.warning("台灣期交所標的清單讀取失敗：%s", exc)
+        taiwan_codes = []
+        errors.append("台灣期交所標的清單讀取失敗")
+    try:
+        binance_instruments = fetch_binance_instruments()
+    except Exception as exc:
+        logging.warning("幣安標的清單讀取失敗：%s", exc)
+        binance_instruments = []
+        errors.append("幣安標的清單讀取失敗")
+
+    frames = [
+        collect_signals(us_instruments, taiwan_codes, binance_instruments, timeframe, now)
+        for timeframe in TIMEFRAMES
+    ]
+    write_payload(frames, now, errors)
     logging.info(
         "Sequential 已更新：%s",
         ", ".join(f"{item['label']} {len(item['signals'])} 個訊號" for item in frames),

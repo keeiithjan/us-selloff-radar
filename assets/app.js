@@ -124,7 +124,7 @@ function makeSequentialSignal(signal, interval) {
   ticker.textContent = signal.symbol;
   const time = document.createElement("p");
   time.className = "exchange";
-  time.textContent = `${signal.exchange} · ${signal.bar_time_et}`;
+  time.textContent = `${signal.market || "市場"} · ${signal.exchange} · ${signal.bar_time_et}`;
   heading.append(ticker, time);
 
   const price = document.createElement("strong");
@@ -158,7 +158,10 @@ function makeTimeframe(frame) {
 
   const meta = document.createElement("p");
   meta.className = "timeframe-meta";
-  meta.textContent = `已計算 ${String(frame.scanned_symbols || 0)} 檔 · 最後完成 K 棒：${frame.last_completed_bar_et || "尚無資料"}`;
+  const markets = Object.entries(frame.scanned_by_market || {})
+    .map(([market, count]) => `${market} ${count} 檔`)
+    .join("、");
+  meta.textContent = `已計算 ${String(frame.scanned_symbols || 0)} 檔${markets ? `（${markets}）` : ""} · ${frame.last_completed_bar_et || "尚無資料"}`;
   panel.append(meta);
 
   if (signals.length === 0) {
