@@ -87,7 +87,7 @@ function makeAlertCard(alert) {
   ticker.textContent = alert.symbol;
   const exchange = document.createElement("p");
   exchange.className = "exchange";
-  exchange.textContent = `${alert.exchange} · ${alert.bar_time_et}`;
+  exchange.textContent = [alert.exchange, alert.industry, alert.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, exchange);
   const drop = document.createElement("div");
   drop.className = "drop";
@@ -129,7 +129,9 @@ function makeSequentialSignal(signal, interval) {
   ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
   const time = document.createElement("p");
   time.className = "exchange";
-  time.textContent = `${signal.market || "市場"} · ${signal.exchange} · ${signal.bar_time_et}`;
+  time.textContent = [signal.market || "市場", signal.exchange, signal.industry, signal.bar_time_et]
+    .filter(Boolean)
+    .join(" · ");
   const age = document.createElement("p");
   age.className = "signal-age";
   age.textContent = Number(signal.age_bars) === 0 ? "最新已完成 K 棒" : `${signal.age_bars} 根 K 棒前`;

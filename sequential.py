@@ -76,6 +76,7 @@ class Instrument:
     market: str
     session: MarketSession
     name: str | None = None
+    industry: str | None = None
 
 
 @dataclass
@@ -490,6 +491,7 @@ def collect_signals(
                 {
                 "symbol": instrument.symbol,
                 "name": instrument.name,
+                "industry": instrument.industry,
                     "exchange": instrument.exchange,
                     "market": instrument.market,
                     "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
@@ -540,7 +542,7 @@ def main() -> None:
     now = datetime.now(NEW_YORK)
     errors: list[str] = []
     us_instruments = [
-        Instrument(item.ticker, item.ticker, item.exchange, "美股", US_SESSION)
+        Instrument(item.ticker, item.ticker, item.exchange, "美股", US_SESSION, None, item.industry or None)
         for item in load_symbols(SYMBOLS_FILE)
     ]
     try:

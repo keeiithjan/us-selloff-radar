@@ -52,12 +52,14 @@ class Settings:
 class Symbol:
     ticker: str
     exchange: str
+    industry: str = ""
 
 
 @dataclass(frozen=True)
 class Alert:
     symbol: str
     exchange: str
+    industry: str
     bar_time_et: str
     last_price: float
     price_change_pct: float
@@ -98,6 +100,7 @@ def load_symbols(path: Path) -> list[Symbol]:
     if "symbol" not in columns:
         raise ValueError("symbols.csv 必須含有 symbol 欄位。")
     exchange_column = columns.get("exchange")
+    industry_column = columns.get("industry")
 
     results: list[Symbol] = []
     seen: set[str] = set()
@@ -108,8 +111,13 @@ def load_symbols(path: Path) -> list[Symbol]:
             if exchange_column and pd.notna(row[exchange_column])
             else "NASDAQ"
         )
+        industry = (
+            str(row[industry_column]).strip()
+            if industry_column and pd.notna(row[industry_column])
+            else ""
+        )
         if ticker and ticker not in seen:
-            results.append(Symbol(ticker=ticker, exchange=exchange))
+            results.append(Symbol(ticker=ticker, exchange=exchange, industry=industry))
             seen.add(ticker)
     if not results:
         raise ValueError("symbols.csv 沒有可用的標的。")
@@ -236,6 +244,7 @@ def detect_alert(
     return Alert(
         symbol=symbol.ticker,
         exchange=symbol.exchange,
+        industry=symbol.industry,
         bar_time_et=last_bar_time.strftime("%Y-%m-%d %H:%M ET"),
         last_price=round(latest_price, 2),
         price_change_pct=round(price_change_pct, 2),
