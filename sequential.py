@@ -342,8 +342,22 @@ def confirmed_bars(
     return frame.loc[frame.index + timeframe.duration <= now_local]
 
 
-def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
-    """Evaluate the supplied Pine algorithm over a completed OHLC frame."""
+def signal_labels(state: SequentialState) -> list[str]:
+    """Only the 9 and 13 marks plotted with text in the supplied Pine code."""
+    labels: list[str] = []
+    if state.buy_setup == 9:
+        labels.append("買方 Setup 9")
+    if state.buy_countdown == 13:
+        labels.append("買方 Countdown 13")
+    if state.sell_setup == 9:
+        labels.append("賣方 Setup 9")
+    if state.sell_countdown == 13:
+        labels.append("賣方 Countdown 13")
+    return labels
+
+
+def sequential_history(frame: pd.DataFrame) -> tuple[SequentialState, list[dict[str, object]]]:
+    """Evaluate all bars and retain every bar on which 9 or 13 occurred."""
     state = SequentialState()
     if len(frame) < 5:
         return state, []
@@ -352,6 +366,7 @@ def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
     high = pd.to_numeric(frame["High"], errors="coerce").astype(float).tolist()
     low = pd.to_numeric(frame["Low"], errors="coerce").astype(float).tolist()
 
+    events: list[dict[str, object]] = []
     for position in range(4, len(frame)):
         current_close = close[position]
         state.buy_setup = (1 if state.buy_setup == 9 else state.buy_setup + 1) if current_close < close[position - 4] else 0
@@ -394,16 +409,26 @@ def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
         if not state.sell_enabled:
             state.sell_setup_lows.clear()
 
-    labels: list[str] = []
-    if state.buy_setup in {7, 8, 9}:
-        labels.append(f"買方 Setup {state.buy_setup}")
-    if state.buy_countdown == 13:
-        labels.append("買方 Countdown 13")
-    if state.sell_setup in {7, 8, 9}:
-        labels.append(f"賣方 Setup {state.sell_setup}")
-    if state.sell_countdown == 13:
-        labels.append("賣方 Countdown 13")
-    return state, labels
+        labels = signal_labels(state)
+        if labels:
+            events.append(
+                {
+                    "position": position,
+                    "labels": labels,
+                    "side": signal_side(labels),
+                    "buy_setup": state.buy_setup,
+                    "sell_setup": state.sell_setup,
+                    "buy_countdown": state.buy_countdown,
+                    "sell_countdown": state.sell_countdown,
+                }
+            )
+    return state, events
+
+
+def sequential_state(frame: pd.DataFrame) -> tuple[SequentialState, list[str]]:
+    """Return the final state; retained for the focused calculation test."""
+    state, _ = sequential_history(frame)
+    return state, signal_labels(state)
 
 
 def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSession) -> str:
@@ -415,6 +440,13 @@ def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSe
         return timestamp.strftime("%Y-%m-%d 日線")
     zone_name = "台北" if session.timezone == TAIPEI else "ET" if session.timezone == NEW_YORK else "UTC"
     return timestamp.strftime(f"%Y-%m-%d %H:%M {zone_name}")
+
+
+def occurrence_time_utc(index_value: object, session: MarketSession) -> str:
+    timestamp = pd.Timestamp(index_value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(session.timezone)
+    return timestamp.tz_convert(UTC).isoformat()
 
 
 def signal_side(labels: list[str]) -> str:
@@ -444,33 +476,42 @@ def collect_signals(
         if len(frame) < 13:
             continue
         scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
-        state, labels = sequential_state(frame)
+        _, events = sequential_history(frame)
         latest_completed.append((pd.Timestamp(frame.index[-1]), instrument.session))
-        if not labels:
-            continue
-        signals.append(
-            {
-                "symbol": instrument.symbol,
-                "exchange": instrument.exchange,
-                "market": instrument.market,
-                "bar_time_et": format_bar_time(frame.index[-1], timeframe, instrument.session),
-                "last_price": round(float(frame["Close"].iloc[-1]), 8),
-                "labels": labels,
-                "side": signal_side(labels),
-                "buy_setup": state.buy_setup,
-                "sell_setup": state.sell_setup,
-                "buy_countdown": state.buy_countdown,
-                "sell_countdown": state.sell_countdown,
-            }
-        )
+        recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "5"))
+        if recent_bars < 1 or recent_bars > 20:
+            raise ValueError("RECENT_SIGNAL_BARS 必須介於 1 到 20")
+        for event in events:
+            position = int(event["position"])
+            age_bars = len(frame) - 1 - position
+            if age_bars >= recent_bars:
+                continue
+            signals.append(
+                {
+                    "symbol": instrument.symbol,
+                    "exchange": instrument.exchange,
+                    "market": instrument.market,
+                    "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
+                    "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
+                    "age_bars": age_bars,
+                    "last_price": round(float(frame["Close"].iloc[position]), 8),
+                    "labels": event["labels"],
+                    "side": event["side"],
+                    "buy_setup": event["buy_setup"],
+                    "sell_setup": event["sell_setup"],
+                    "buy_countdown": event["buy_countdown"],
+                    "sell_countdown": event["sell_countdown"],
+                }
+            )
 
-    signals.sort(key=lambda item: (str(item["market"]), str(item["symbol"]), item["labels"]))
+    signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
     return {
         "key": timeframe.key,
         "label": timeframe.label,
         "tradingview_interval": timeframe.tradingview_interval,
         "scanned_symbols": sum(scanned_by_market.values()),
         "scanned_by_market": scanned_by_market,
+        "recent_bars": int(os.getenv("RECENT_SIGNAL_BARS", "5")),
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
     }

@@ -93,6 +93,32 @@ h2 { margin-bottom: 8px; font-size: 1.2rem; }
 .sequential-note { margin: 14px 0 0; }
 .sequential-source { margin: 16px 0 0; }
 
+.sequential-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sequential-controls label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.sequential-controls select {
+  min-height: 40px;
+  border: 1px solid var(--card-edge);
+  border-radius: 9px;
+  background: #0b192a;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  padding: 0 10px;
+}
+
 .sequential-frames {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -126,6 +152,7 @@ h2 { margin-bottom: 8px; font-size: 1.2rem; }
 .sequential-signal.sell { border-color: #82404a; }
 .sequential-signal h4 { margin: 0; font-size: 1rem; }
 .signal-price { color: var(--ink); font-size: .9rem; white-space: nowrap; }
+.signal-age { margin: 5px 0 0; color: var(--accent); font-size: .73rem; font-weight: 800; }
 .signal-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
 .signal-labels span { padding: 4px 7px; border-radius: 999px; background: var(--accent-deep); color: var(--accent); font-size: .72rem; font-weight: 800; }
 .sequential-signal.sell .signal-labels span { background: var(--danger-deep); color: #ffb1bd; }

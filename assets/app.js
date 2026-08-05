@@ -10,7 +10,11 @@ const elements = {
   sequentialFrames: document.querySelector("#sequential-frames"),
   sequentialUpdated: document.querySelector("#sequential-updated"),
   sequentialSource: document.querySelector("#sequential-source"),
+  sequentialMarket: document.querySelector("#sequential-market"),
+  sequentialSort: document.querySelector("#sequential-sort"),
 };
+
+let sequentialPayload = null;
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -125,7 +129,10 @@ function makeSequentialSignal(signal, interval) {
   const time = document.createElement("p");
   time.className = "exchange";
   time.textContent = `${signal.market || "市場"} · ${signal.exchange} · ${signal.bar_time_et}`;
-  heading.append(ticker, time);
+  const age = document.createElement("p");
+  age.className = "signal-age";
+  age.textContent = Number(signal.age_bars) === 0 ? "最新已完成 K 棒" : `${signal.age_bars} 根 K 棒前`;
+  heading.append(ticker, time, age);
 
   const price = document.createElement("strong");
   price.className = "signal-price";
@@ -143,6 +150,19 @@ function makeSequentialSignal(signal, interval) {
   return card;
 }
 
+function filteredSignals(frame) {
+  const selectedMarket = elements.sequentialMarket.value;
+  const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
+  const signals = Array.isArray(frame.signals) ? frame.signals : [];
+  return signals
+    .filter((signal) => selectedMarket === "all" || signal.market === selectedMarket)
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.occurred_at_utc || 0);
+      const rightTime = Date.parse(right.occurred_at_utc || 0);
+      return multiplier * (leftTime - rightTime);
+    });
+}
+
 function makeTimeframe(frame) {
   const panel = document.createElement("section");
   panel.className = "timeframe";
@@ -151,8 +171,9 @@ function makeTimeframe(frame) {
   const title = document.createElement("h3");
   title.textContent = frame.label || frame.key;
   const count = document.createElement("span");
-  const signals = Array.isArray(frame.signals) ? frame.signals : [];
-  count.textContent = `${signals.length} 個目前訊號`;
+  const signals = filteredSignals(frame);
+  const recentBars = Number(frame.recent_bars || 5);
+  count.textContent = `最近 ${recentBars} 根：${signals.length} 個`;
   header.append(title, count);
   panel.append(header);
 
@@ -167,7 +188,7 @@ function makeTimeframe(frame) {
   if (signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "timeframe-empty";
-    empty.textContent = "目前最後一根已完成 K 棒沒有 7、8、9 或 13 訊號。";
+    empty.textContent = `目前篩選範圍的最近 ${recentBars} 根已完成 K 棒，沒有 Setup 9 或 Countdown 13。`;
     panel.append(empty);
     return panel;
   }
@@ -182,6 +203,7 @@ function makeTimeframe(frame) {
 }
 
 function renderSequential(payload) {
+  sequentialPayload = payload;
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   elements.sequentialUpdated.textContent = payload.updated_at_utc
@@ -217,5 +239,11 @@ async function refresh() {
 }
 
 elements.refresh.addEventListener("click", refresh);
+elements.sequentialMarket.addEventListener("change", () => {
+  if (sequentialPayload) renderSequential(sequentialPayload);
+});
+elements.sequentialSort.addEventListener("change", () => {
+  if (sequentialPayload) renderSequential(sequentialPayload);
+});
 refresh();
 setInterval(refresh, 60_000);
