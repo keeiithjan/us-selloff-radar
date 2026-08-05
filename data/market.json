@@ -1,7 +1,7 @@
 {
   "updated_at_utc": null,
   "futures": [
-    {"key": "taiwan", "label": "台指期", "ticker": "WTX&", "currency": "TWD", "unavailable": true, "tradingview_symbol": "TAIFEX:TX1!"},
+    {"key": "taiwan", "label": "台指期", "ticker": "WTX&", "currency": "TWD", "unavailable": true, "tradingview_symbol": "TAIFEX:TXF1!"},
     {"key": "nasdaq", "label": "NASDAQ 100 期貨", "ticker": "NQ=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:NQ1!"},
     {"key": "dow", "label": "道瓊期貨", "ticker": "YM=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CBOT_MINI:YM1!"},
     {"key": "sox", "label": "SOX 期貨", "ticker": "SOX=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:SOX1!"},

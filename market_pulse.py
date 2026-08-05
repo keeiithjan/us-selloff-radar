@@ -49,7 +49,7 @@ class FutureSpec:
 FUTURES = (
     # Yahoo's Taiwan near-month ticker can be unavailable to its global API.
     # IX0126.TW is retained as an explicitly marked fallback quote.
-    FutureSpec("taiwan", "台指期", ("WTX&", "IX0126.TW"), "TWD", "TAIFEX:TX1!"),
+    FutureSpec("taiwan", "台指期", ("WTX&", "IX0126.TW"), "TWD", "TAIFEX:TXF1!"),
     FutureSpec("nasdaq", "NASDAQ 100 期貨", ("NQ=F",), "USD", "CME_MINI:NQ1!"),
     FutureSpec("dow", "道瓊期貨", ("YM=F",), "USD", "CBOT_MINI:YM1!"),
     FutureSpec("sox", "SOX 期貨", ("SOX=F",), "USD", "CME_MINI:SOX1!"),
