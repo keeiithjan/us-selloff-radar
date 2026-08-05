@@ -12,6 +12,7 @@ const elements = {
   sequentialSource: document.querySelector("#sequential-source"),
   sequentialMarket: document.querySelector("#sequential-market"),
   sequentialSort: document.querySelector("#sequential-sort"),
+  sequentialSide: document.querySelector("#sequential-side"),
 };
 
 let sequentialPayload = null;
@@ -125,7 +126,7 @@ function makeSequentialSignal(signal, interval) {
 
   const heading = document.createElement("div");
   const ticker = document.createElement("h4");
-  ticker.textContent = signal.symbol;
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
   const time = document.createElement("p");
   time.className = "exchange";
   time.textContent = `${signal.market || "市場"} · ${signal.exchange} · ${signal.bar_time_et}`;
@@ -152,10 +153,12 @@ function makeSequentialSignal(signal, interval) {
 
 function filteredSignals(frame) {
   const selectedMarket = elements.sequentialMarket.value;
+  const selectedSide = elements.sequentialSide.value;
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
   const signals = Array.isArray(frame.signals) ? frame.signals : [];
   return signals
     .filter((signal) => selectedMarket === "all" || signal.market === selectedMarket)
+    .filter((signal) => selectedSide === "all" || signal.side === selectedSide)
     .sort((left, right) => {
       const leftTime = Date.parse(left.occurred_at_utc || 0);
       const rightTime = Date.parse(right.occurred_at_utc || 0);
@@ -243,6 +246,9 @@ elements.sequentialMarket.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 elements.sequentialSort.addEventListener("change", () => {
+  if (sequentialPayload) renderSequential(sequentialPayload);
+});
+elements.sequentialSide.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 refresh();

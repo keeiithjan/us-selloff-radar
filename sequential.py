@@ -75,6 +75,7 @@ class Instrument:
     exchange: str
     market: str
     session: MarketSession
+    name: str | None = None
 
 
 @dataclass
@@ -138,7 +139,7 @@ def _http_json(path: str) -> object:
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_taifex_stock_futures() -> list[str]:
+def fetch_taifex_stock_futures() -> dict[str, str]:
     """Read the official, current stock-futures underlying list from TAIFEX.
 
     The first table is ordinary-share stock futures. ETF futures are a separate
@@ -153,18 +154,17 @@ def fetch_taifex_stock_futures() -> list[str]:
     if not parser.tables or len(parser.tables[0]) < 2:
         raise RuntimeError("無法讀取台灣期交所股票期貨標的清單")
 
-    codes: list[str] = []
-    seen: set[str] = set()
+    underlyings: dict[str, str] = {}
     for row in parser.tables[0][1:]:
-        if len(row) < 3:
+        if len(row) < 4:
             continue
         code = row[2].strip().upper()
-        if re.fullmatch(r"\d{4,6}[A-Z]?", code) and code not in seen:
-            codes.append(code)
-            seen.add(code)
-    if len(codes) < 100:
-        raise RuntimeError(f"台灣期交所清單格式異常，僅取得 {len(codes)} 檔")
-    return codes
+        name = re.sub(r"期貨$", "", row[3].strip())
+        if re.fullmatch(r"\d{4,6}[A-Z]?", code) and code not in underlyings:
+            underlyings[code] = name or code
+    if len(underlyings) < 100:
+        raise RuntimeError(f"台灣期交所清單格式異常，僅取得 {len(underlyings)} 檔")
+    return underlyings
 
 
 def download_timeframe(
@@ -210,18 +210,18 @@ def download_yahoo_records(
 
 
 def download_taiwan_records(
-    codes: list[str], timeframe: Timeframe
+    underlyings: dict[str, str], timeframe: Timeframe
 ) -> list[tuple[Instrument, pd.DataFrame]]:
     """Resolve .TW first, then .TWO for individual-futures underlyings."""
     primary = [
-        Instrument(f"{code}.TW", code, "TWSE", "台股個股期貨標的", TW_SESSION)
-        for code in codes
+        Instrument(f"{code}.TW", code, "TWSE", "台股個股期貨標的", TW_SESSION, name)
+        for code, name in underlyings.items()
     ]
     primary_records = download_yahoo_records(primary, timeframe)
     found = {item.symbol for item, _ in primary_records}
     fallback = [
-        Instrument(f"{code}.TWO", code, "TPEX", "台股個股期貨標的", TW_SESSION)
-        for code in codes
+        Instrument(f"{code}.TWO", code, "TPEX", "台股個股期貨標的", TW_SESSION, name)
+        for code, name in underlyings.items()
         if code not in found
     ]
     return primary_records + download_yahoo_records(fallback, timeframe)
@@ -459,13 +459,13 @@ def signal_side(labels: list[str]) -> str:
 
 def collect_signals(
     us_instruments: list[Instrument],
-    taiwan_codes: list[str],
+    taiwan_underlyings: dict[str, str],
     binance_instruments: list[Instrument],
     timeframe: Timeframe,
     now: datetime,
 ) -> dict[str, object]:
     records = download_yahoo_records(us_instruments, timeframe)
-    records.extend(download_taiwan_records(taiwan_codes, timeframe))
+    records.extend(download_taiwan_records(taiwan_underlyings, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
     scanned_by_market: dict[str, int] = {}
@@ -488,7 +488,8 @@ def collect_signals(
                 continue
             signals.append(
                 {
-                    "symbol": instrument.symbol,
+                "symbol": instrument.symbol,
+                "name": instrument.name,
                     "exchange": instrument.exchange,
                     "market": instrument.market,
                     "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
@@ -543,10 +544,10 @@ def main() -> None:
         for item in load_symbols(SYMBOLS_FILE)
     ]
     try:
-        taiwan_codes = fetch_taifex_stock_futures()
+        taiwan_underlyings = fetch_taifex_stock_futures()
     except Exception as exc:
         logging.warning("台灣期交所標的清單讀取失敗：%s", exc)
-        taiwan_codes = []
+        taiwan_underlyings = {}
         errors.append("台灣期交所標的清單讀取失敗")
     try:
         binance_instruments = fetch_binance_instruments()
@@ -556,7 +557,7 @@ def main() -> None:
         errors.append("幣安標的清單讀取失敗")
 
     frames = [
-        collect_signals(us_instruments, taiwan_codes, binance_instruments, timeframe, now)
+        collect_signals(us_instruments, taiwan_underlyings, binance_instruments, timeframe, now)
         for timeframe in TIMEFRAMES
     ]
     write_payload(frames, now, errors)
