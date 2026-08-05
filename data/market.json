@@ -1,0 +1,13 @@
+{
+  "updated_at_utc": null,
+  "futures": [
+    {"key": "taiwan", "label": "台指期", "ticker": "WTX&", "currency": "TWD", "unavailable": true, "tradingview_symbol": "TAIFEX:TX1!"},
+    {"key": "nasdaq", "label": "NASDAQ 100 期貨", "ticker": "NQ=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:NQ1!"},
+    {"key": "dow", "label": "道瓊期貨", "ticker": "YM=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CBOT_MINI:YM1!"},
+    {"key": "sox", "label": "SOX 期貨", "ticker": "SOX=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:SOX1!"},
+    {"key": "russell", "label": "Russell 2000 期貨", "ticker": "RTY=F", "currency": "USD", "unavailable": true, "tradingview_symbol": "CME_MINI:RTY1!"}
+  ],
+  "premarket": {"active": false, "threshold_pct": 2, "scanned_symbols": 0, "movers": []},
+  "source": "Yahoo Finance via yfinance；期貨與盤前報價可能延遲。",
+  "errors": []
+}

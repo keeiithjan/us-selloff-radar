@@ -18,6 +18,26 @@
         <button id="refresh" class="refresh" type="button">更新畫面</button>
       </header>
 
+      <section class="market-pulse" aria-labelledby="market-pulse-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MARKET PULSE</p>
+            <h2 id="market-pulse-title">全球期貨脈搏</h2>
+          </div>
+          <p id="market-pulse-updated" class="muted"></p>
+        </div>
+        <div id="futures-strip" class="futures-strip" aria-live="polite"></div>
+        <div class="premarket-heading">
+          <div>
+            <p class="eyebrow">US PRE-MARKET MOVERS</p>
+            <h2>指標股盤前異動</h2>
+          </div>
+          <p id="premarket-summary" class="muted"></p>
+        </div>
+        <div id="premarket-movers" class="premarket-movers" aria-live="polite"></div>
+        <p id="premarket-empty" class="premarket-empty" hidden></p>
+      </section>
+
       <section class="status-grid" aria-label="掃描狀態">
         <article class="metric">
           <span>市場狀態</span>

@@ -2,6 +2,8 @@
 
 這個專案是手機友善的靜態網頁應用程式。GitHub Actions 每 5 分鐘執行一次掃描；GitHub Pages 發布最新結果。每張警示卡都能直接打開對應的 TradingView 圖表。
 
+首頁頂端另有「全球期貨脈搏」與「指標股盤前異動」：顯示台指期、NASDAQ 100、道瓊、SOX、Russell 2000 期貨的最近報價及漲跌幅，並在美東 04:00–09:30 掃描 70 檔大型指標股的盤前異常漲跌。預設異常門檻為 `±2%`，最多顯示 12 檔；可在 workflow 的 `PREMARKET_ABNORMAL_PCT` 與 `PREMARKET_MAX_MOVERS` 調整。這些資料由 Yahoo Finance 提供，可能有延遲；台指期全球報價不可用時會在卡片上標示為期指指數替代報價。
+
 除了急跌爆量掃描，首頁也提供 **Sequential 7／8／9／13 多週期監測**，依使用者提供的 quantifytools Pine Script 規則，顯示目前最後一根已完成 K 棒上的訊號：
 
 | 週期 | Yahoo 資料週期 | TradingView 開啟週期 |

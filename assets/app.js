@@ -14,6 +14,11 @@ const elements = {
   sequentialSort: document.querySelector("#sequential-sort"),
   sequentialSide: document.querySelector("#sequential-side"),
   sequentialMomentum: document.querySelector("#sequential-momentum"),
+  marketPulseUpdated: document.querySelector("#market-pulse-updated"),
+  futuresStrip: document.querySelector("#futures-strip"),
+  premarketSummary: document.querySelector("#premarket-summary"),
+  premarketMovers: document.querySelector("#premarket-movers"),
+  premarketEmpty: document.querySelector("#premarket-empty"),
 };
 
 let sequentialPayload = null;
@@ -33,6 +38,21 @@ function formatCompactCurrency(value) {
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(Number(value));
+}
+
+function formatMarketPrice(value, currency) {
+  const code = currency === "TWD" ? "TWD" : "USD";
+  return new Intl.NumberFormat(code === "TWD" ? "zh-TW" : "en-US", {
+    style: "currency",
+    currency: code,
+    maximumFractionDigits: code === "TWD" ? 0 : 2,
+  }).format(Number(value));
+}
+
+function formatSigned(value, digits = 2) {
+  const number = Number(value);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}${number.toFixed(digits)}`;
 }
 
 function formatTaipei(value) {
@@ -63,6 +83,12 @@ function tradingViewUrl(item, interval) {
   const exchange = String(item.exchange || "NASDAQ").replace(/[^A-Z]/g, "");
   const query = new URLSearchParams({ symbol: `${exchange}:${symbol}` });
   if (interval) query.set("interval", interval);
+  return `https://www.tradingview.com/chart/?${query.toString()}`;
+}
+
+function marketTradingViewUrl(symbol) {
+  const query = new URLSearchParams({ symbol: String(symbol || "") });
+  query.set("interval", "5");
   return `https://www.tradingview.com/chart/?${query.toString()}`;
 }
 
@@ -117,6 +143,92 @@ function renderSelloff(payload) {
   elements.source.textContent = payload.source || "";
   elements.alerts.replaceChildren(...alerts.map(makeAlertCard));
   elements.empty.hidden = alerts.length !== 0;
+}
+
+function makeFutureCard(future) {
+  const available = !future.unavailable && Number.isFinite(Number(future.last_price));
+  const change = Number(future.change_pct || 0);
+  const direction = change > 0 ? "up" : change < 0 ? "down" : "flat";
+  const card = document.createElement("article");
+  card.className = `future-card ${available ? direction : "unavailable"}`;
+
+  const label = document.createElement("p");
+  label.className = "future-label";
+  label.textContent = future.label || future.ticker;
+  const price = document.createElement("strong");
+  price.className = "future-price";
+  price.textContent = available ? formatMarketPrice(future.last_price, future.currency) : "—";
+  const movement = document.createElement("p");
+  movement.className = "future-movement";
+  movement.textContent = available
+    ? `${formatSigned(future.change, future.currency === "TWD" ? 0 : 2)} · ${formatSigned(change)}%`
+    : "報價暫時無法取得";
+  const metadata = document.createElement("p");
+  metadata.className = "future-meta";
+  metadata.textContent = future.fallback_quote
+    ? "期指指數替代報價"
+    : future.as_of_utc
+      ? `資料時間 · ${formatTaipei(future.as_of_utc)}`
+      : "等待下一次更新";
+  card.append(label, price, movement, metadata);
+
+  if (future.tradingview_symbol) {
+    const link = document.createElement("a");
+    link.className = "future-link";
+    link.href = marketTradingViewUrl(future.tradingview_symbol);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "查看圖表";
+    card.append(link);
+  }
+  return card;
+}
+
+function makePremarketCard(mover) {
+  const card = document.createElement("article");
+  card.className = `premarket-card ${mover.direction === "up" ? "up" : "down"}`;
+  const top = document.createElement("div");
+  top.className = "alert-top";
+  const name = document.createElement("div");
+  const ticker = document.createElement("h3");
+  ticker.className = "ticker";
+  ticker.textContent = mover.symbol;
+  const industry = document.createElement("p");
+  industry.className = "exchange";
+  industry.textContent = [mover.exchange, mover.industry, mover.bar_time_et].filter(Boolean).join(" · ");
+  name.append(ticker, industry);
+  const change = document.createElement("strong");
+  change.className = "premarket-change";
+  change.textContent = `${formatSigned(mover.change_pct)}%`;
+  top.append(name, change);
+
+  const details = document.createElement("p");
+  details.className = "premarket-details";
+  details.textContent = `盤前 ${formatMarketPrice(mover.last_price, "USD")}｜昨收 ${formatMarketPrice(mover.previous_close, "USD")}`;
+  card.append(top, details, makeTradingViewLink(mover, "5", "在 TradingView 檢視"));
+  return card;
+}
+
+function renderMarketPulse(payload) {
+  const futures = Array.isArray(payload.futures) ? payload.futures : [];
+  elements.futuresStrip.replaceChildren(...futures.map(makeFutureCard));
+  elements.marketPulseUpdated.textContent = payload.updated_at_utc
+    ? `資料更新 · ${formatTaipei(payload.updated_at_utc)}`
+    : "等待下一次更新";
+
+  const premarket = payload.premarket || {};
+  const movers = Array.isArray(premarket.movers) ? premarket.movers : [];
+  const threshold = Number(premarket.threshold_pct || 2);
+  elements.premarketSummary.textContent = premarket.active
+    ? `美東盤前中 · 已掃描 ${Number(premarket.scanned_symbols || 0)} 檔 · 異常門檻 ±${threshold}%`
+    : "僅於美東 04:00–09:30 掃描";
+  elements.premarketMovers.replaceChildren(...movers.map(makePremarketCard));
+  elements.premarketEmpty.hidden = movers.length !== 0;
+  if (movers.length === 0) {
+    elements.premarketEmpty.textContent = premarket.active
+      ? `目前沒有指標股達到 ±${threshold}% 的盤前異常門檻。`
+      : "目前非美股盤前時段；下一個盤前時段會自動更新。";
+  }
 }
 
 function makeSequentialSignal(signal, interval) {
@@ -248,12 +360,14 @@ async function refresh() {
   elements.refresh.disabled = true;
   elements.refresh.textContent = "更新中…";
   try {
-    const [alerts, sequential] = await Promise.all([
+    const [alerts, sequential, market] = await Promise.all([
       loadJson("data/alerts.json"),
       loadJson("data/sequential.json"),
+      loadJson("data/market.json"),
     ]);
     renderSelloff(alerts);
     renderSequential(sequential);
+    renderMarketPulse(market);
   } catch (error) {
     elements.status.textContent = "資料讀取失敗";
     elements.source.textContent = "請稍後重試；若持續發生，請查看 GitHub Actions 的最近執行結果。";
