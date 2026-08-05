@@ -294,8 +294,9 @@ function renderMarketPulse(payload) {
   elements.premarketSummary.textContent = premarket.active
     ? `美東盤前中 · 已掃描 ${Number(premarket.scanned_symbols || 0)} 檔 · 異常門檻 ±${threshold}%`
     : "僅於美東 04:00–09:30 掃描";
-  if (premarket.binance_amd_enabled) {
-    elements.premarketSummary.textContent += "｜AMDUSDT 夜盤合約持續監控";
+  const binanceCount = Number(premarket.binance_equity_scanned_symbols || 0);
+  if (premarket.binance_equity_enabled && binanceCount > 0) {
+    elements.premarketSummary.textContent += `｜Binance 股票 USDT 合約監控 ${binanceCount} 檔`;
   }
   elements.premarketMovers.replaceChildren(...movers.map(makePremarketCard));
   elements.premarketEmpty.hidden = movers.length !== 0;

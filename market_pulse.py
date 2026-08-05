@@ -31,10 +31,10 @@ UTC = timezone.utc
 PREMARKET_OPEN = clock_time(4, 0)
 REGULAR_OPEN = clock_time(9, 30)
 REGULAR_CLOSE = clock_time(16, 0)
-BINANCE_AMD_SYMBOL = "AMDUSDT"
-BINANCE_AMD_TICKER_URL = (
-    "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=" + BINANCE_AMD_SYMBOL
-)
+BINANCE_EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+BINANCE_TICKERS_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+# Binance uses BRKB for Berkshire B, while Yahoo/TradingView use BRK-B.
+BINANCE_STOCK_ALIASES = {"BRKB": "BRK-B"}
 
 
 @dataclass(frozen=True)
@@ -281,7 +281,7 @@ def premarket_mover(
 
 
 def latest_regular_close(raw_frame: pd.DataFrame, now: datetime) -> float | None:
-    """Return AMD's latest completed US regular-session close when available."""
+    """Return a symbol's latest completed US regular-session close when available."""
     if raw_frame.empty:
         return None
     frame = raw_frame.copy()
@@ -302,64 +302,110 @@ def latest_regular_close(raw_frame: pd.DataFrame, now: datetime) -> float | None
     return close if close > 0 else None
 
 
-def download_binance_amd_ticker() -> dict[str, object] | None:
-    """Read the free public Binance USDⓈ-M AMD stock-perpetual quote."""
-    request = Request(BINANCE_AMD_TICKER_URL, headers={"User-Agent": "us-selloff-radar/1.0"})
+def download_binance_json(url: str) -> object | None:
+    """Read one fixed public Binance USDⓈ-M endpoint without an API key."""
+    request = Request(url, headers={"User-Agent": "us-selloff-radar/1.0"})
     try:
-        with urlopen(request, timeout=12) as response:  # nosec B310 - fixed Binance HTTPS endpoint
-            payload = json.loads(response.read().decode("utf-8"))
+        with urlopen(request, timeout=15) as response:  # nosec B310 - fixed Binance HTTPS endpoint
+            return json.loads(response.read().decode("utf-8"))
     except Exception as exc:
-        logging.warning("Binance %s quote failed: %s", BINANCE_AMD_SYMBOL, exc)
+        logging.warning("Binance public data request failed: %s", exc)
         return None
-    if payload.get("symbol") != BINANCE_AMD_SYMBOL:
-        return None
-    return payload
 
 
-def binance_amd_mover(
-    raw_frame: pd.DataFrame, now: datetime, threshold_pct: float
-) -> dict[str, object] | None:
-    """Add AMDUSDT outside normal US hours, measured against the cash close.
+def discover_binance_equity_contracts(all_symbols: Iterable[Symbol]) -> dict[str, Symbol]:
+    """Match the user's watchlist to live USDT equity perpetual contracts.
 
-    AMDUSDT is a Binance TradFi perpetual contract, not NASDAQ AMD stock.  We
-    use the most recent completed regular-session AMD close when Yahoo makes it
-    available; otherwise the Binance rolling-24-hour open is labelled clearly.
+    The exchange list is fetched each scan: new listings are automatically
+    included and delisted/paused contracts are automatically excluded.
     """
-    quote = download_binance_amd_ticker()
-    if not quote:
-        return None
-    try:
-        last_price = float(quote["lastPrice"])
-        fallback_baseline = float(quote["openPrice"])
-        as_of = pd.Timestamp(int(quote["closeTime"]), unit="ms", tz=UTC)
-    except (KeyError, TypeError, ValueError):
-        return None
-    if last_price <= 0 or fallback_baseline <= 0:
-        return None
+    payload = download_binance_json(BINANCE_EXCHANGE_INFO_URL)
+    if not isinstance(payload, dict):
+        return {}
+    watchlist = {item.ticker: item for item in all_symbols}
+    matches: dict[str, Symbol] = {}
+    for contract in payload.get("symbols", []):
+        if not isinstance(contract, dict):
+            continue
+        if (
+            contract.get("quoteAsset") != "USDT"
+            or contract.get("underlyingType") != "EQUITY"
+            or contract.get("contractType") != "TRADIFI_PERPETUAL"
+            or contract.get("status") != "TRADING"
+        ):
+            continue
+        base_asset = str(contract.get("baseAsset", "")).upper()
+        cash_ticker = BINANCE_STOCK_ALIASES.get(base_asset, base_asset)
+        stock = watchlist.get(cash_ticker)
+        contract_symbol = str(contract.get("symbol", "")).upper()
+        if stock and contract_symbol:
+            matches[contract_symbol] = stock
+    return matches
 
-    previous_close = latest_regular_close(raw_frame, now)
-    reference_label = "AMD 最近一般盤收盤"
-    if previous_close is None:
-        previous_close = fallback_baseline
-        reference_label = "Binance 24 小時開盤"
-    change_pct = (last_price / previous_close - 1) * 100
-    if abs(change_pct) < threshold_pct:
-        return None
+
+def download_binance_tickers() -> dict[str, dict[str, object]]:
+    """Load all current 24-hour quotes in one request, then filter locally."""
+    payload = download_binance_json(BINANCE_TICKERS_URL)
+    if not isinstance(payload, list):
+        return {}
     return {
-        "symbol": BINANCE_AMD_SYMBOL,
-        "exchange": "BINANCE USDⓈ-M",
-        "industry": "AMD 股票永續合約（非現股）",
-        "last_price": round(last_price, 4),
-        "previous_close": round(previous_close, 4),
-        "reference_label": reference_label,
-        "change": round(last_price - previous_close, 4),
-        "change_pct": round(change_pct, 3),
-        "direction": "up" if change_pct > 0 else "down",
-        "bar_time_et": as_of.tz_convert(NEW_YORK).strftime("%Y-%m-%d %H:%M ET"),
-        "occurred_at_utc": as_of.isoformat(),
-        "tradingview_symbol": "BINANCE:AMDUSDT.P",
-        "source": "Binance USDⓈ-M public API",
+        str(item.get("symbol", "")).upper(): item
+        for item in payload
+        if isinstance(item, dict) and item.get("symbol")
     }
+
+
+def binance_equity_movers(
+    contracts: dict[str, Symbol],
+    raw_frames: dict[str, pd.DataFrame],
+    now: datetime,
+    threshold_pct: float,
+) -> list[dict[str, object]]:
+    """Create abnormal-move cards for all discovered Binance stock contracts."""
+    tickers = download_binance_tickers()
+    movers: list[dict[str, object]] = []
+    for contract_symbol, stock in contracts.items():
+        quote = tickers.get(contract_symbol)
+        if not quote:
+            continue
+        try:
+            last_price = float(quote["lastPrice"])
+            fallback_baseline = float(quote["openPrice"])
+            as_of = pd.Timestamp(int(quote["closeTime"]), unit="ms", tz=UTC)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if last_price <= 0 or fallback_baseline <= 0:
+            continue
+
+        previous_close = latest_regular_close(raw_frames.get(stock.ticker, pd.DataFrame()), now)
+        reference_label = f"{stock.ticker} 最近一般盤收盤"
+        if previous_close is None:
+            previous_close = fallback_baseline
+            reference_label = "Binance 24 小時開盤"
+        change_pct = (last_price / previous_close - 1) * 100
+        if abs(change_pct) < threshold_pct:
+            continue
+        industry = " · ".join(
+            part for part in (stock.ticker, stock.industry, "股票永續合約（非現股）") if part
+        )
+        movers.append(
+            {
+                "symbol": contract_symbol,
+                "exchange": "BINANCE USDⓈ-M",
+                "industry": industry,
+                "last_price": round(last_price, 4),
+                "previous_close": round(previous_close, 4),
+                "reference_label": reference_label,
+                "change": round(last_price - previous_close, 4),
+                "change_pct": round(change_pct, 3),
+                "direction": "up" if change_pct > 0 else "down",
+                "bar_time_et": as_of.tz_convert(NEW_YORK).strftime("%Y-%m-%d %H:%M ET"),
+                "occurred_at_utc": as_of.isoformat(),
+                "tradingview_symbol": f"BINANCE:{contract_symbol}.P",
+                "source": "Binance USDⓈ-M public API",
+            }
+        )
+    return movers
 
 
 def selected_premarket_symbols(all_symbols: Iterable[Symbol]) -> list[Symbol]:
@@ -381,6 +427,7 @@ def main() -> None:
     threshold_pct = _float_env("PREMARKET_ABNORMAL_PCT", 2.0, 0.1, 25.0)
     max_movers = _positive_int_env("PREMARKET_MAX_MOVERS", 12, 1, 30)
     errors: list[str] = []
+    binance_contracts: dict[str, Symbol] = {}
 
     futures: list[dict[str, object]] = []
     for spec in FUTURES:
@@ -400,17 +447,19 @@ def main() -> None:
             )
 
     try:
-        symbols = selected_premarket_symbols(load_symbols(SYMBOLS_FILE))
+        all_symbols = load_symbols(SYMBOLS_FILE)
+        symbols = selected_premarket_symbols(all_symbols)
         frames = download_premarket_frames(symbols)
+        binance_contracts = discover_binance_equity_contracts(all_symbols)
+        binance_cash_tickers = {stock.ticker for stock in binance_contracts.values()}
         movers = [
             result
             for item in symbols
-            if item.ticker != "AMD"
+            if item.ticker not in binance_cash_tickers
             if (result := premarket_mover(item, frames.get(item.ticker, pd.DataFrame()), now, threshold_pct))
             is not None
         ]
-        if (amd_mover := binance_amd_mover(frames.get("AMD", pd.DataFrame()), now, threshold_pct)):
-            movers.append(amd_mover)
+        movers.extend(binance_equity_movers(binance_contracts, frames, now, threshold_pct))
     except Exception as exc:
         logging.warning("Pre-market scan failed: %s", exc)
         symbols, frames, movers = [], {}, []
@@ -427,7 +476,8 @@ def main() -> None:
             "futures": futures,
             "premarket": {
                 "active": premarket_active,
-                "binance_amd_enabled": True,
+                "binance_equity_enabled": bool(binance_contracts),
+                "binance_equity_scanned_symbols": len(binance_contracts),
                 "threshold_pct": threshold_pct,
                 "scanned_symbols": len(frames),
                 "movers": movers[:max_movers],
