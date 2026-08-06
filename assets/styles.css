@@ -175,8 +175,23 @@ body {
 .future-sparkline.is-drawing .sparkline-line { stroke-dasharray: 180; animation: sparkline-trace .9s cubic-bezier(.2, .75, .25, 1) both; }
 @keyframes sparkline-trace { from { stroke-dashoffset: 180; opacity: .15; } to { stroke-dashoffset: 0; opacity: 1; } }
 .future-meta { min-height: 1.3em; margin: 9px 0 0; color: var(--muted); font-size: .67rem; line-height: 1.35; }
-.future-link { display: inline-block; margin-top: 10px; color: var(--ink); font-size: .72rem; font-weight: 800; text-decoration-color: #aab4ac; text-underline-offset: 3px; }
-.future-link:hover { color: var(--accent); }
+.future-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 10px;
+  border: 1px solid rgb(32 224 191 / 44%);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: Arial, sans-serif;
+  font-size: .68rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+.future-link:hover { border-color: var(--accent); background: var(--accent); color: #041019; }
 
 .matrix-number {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
@@ -253,7 +268,7 @@ body {
 .premarket-change { color: var(--accent); font-size: 1.12rem; text-shadow: 0 0 14px rgb(32 224 191 / 32%); white-space: nowrap; }
 .premarket-card.down .premarket-change { color: var(--danger); }
 .premarket-details { margin: 14px 0; color: var(--muted); font-size: .78rem; }
-.premarket-card .tv-link { padding: 9px 10px; font-size: .78rem; }
+.premarket-card .tv-link { margin-top: 2px; }
 .premarket-empty { margin: 16px 0 0; padding: 20px 16px; border: 1px dashed #cfd5cd; border-radius: 12px; color: var(--muted); font-size: .86rem; text-align: center; }
 
 .eyebrow {
@@ -352,7 +367,19 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .stat { min-width: 0; padding: 10px 11px; border: 1px solid rgb(255 95 119 / 16%); border-radius: 6px; background: var(--danger-soft); }
 .stat span { display: block; color: #f1a6b2; font-size: .71rem; }
 .stat strong { display: block; margin-top: 5px; font-size: .92rem; }
-.tv-link { display: inline-flex; align-items: center; justify-content: center; width: fit-content; min-height: 34px; padding: 7px 10px; font-size: .72rem; letter-spacing: .01em; }
+.tv-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-family: Arial, sans-serif;
+  font-size: .72rem;
+  font-weight: 900;
+  letter-spacing: -.04em;
+}
 
 .empty {
   margin: 18px 0;
@@ -430,7 +457,7 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .signal-confirmation { margin: 0 0 12px; font-size: .75rem; font-weight: 750; line-height: 1.55; }
 .signal-confirmation.confirmed { color: #65f2d1; }
 .signal-confirmation.pending { color: var(--muted); }
-.sequential-signal .tv-link { padding: 9px 10px; font-size: .8rem; }
+.sequential-signal .tv-link { margin-top: 2px; }
 .trend-reclaim-monitor { margin-top: 32px; padding-top: 25px; border-top: 1px solid var(--line); }
 .trend-reclaim-monitor h3 { margin: 0; font-size: 1.12rem; letter-spacing: -.02em; }
 .trend-reclaim-frames { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
@@ -439,7 +466,7 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .trend-reclaim-signal { padding: 13px; border: 1px solid rgb(54 185 255 / 35%); border-left: 3px solid var(--electric); border-radius: 8px; background: rgb(5 14 25 / 68%); }
 .reclaim-status { margin: 7px 0 0; color: #80d5ff; font-size: .72rem; font-weight: 800; }
 .reclaim-rule { margin: 11px 0 0; color: #d3deef; font-size: .75rem; font-weight: 700; line-height: 1.55; }
-.trend-reclaim-signal .tv-link { margin-top: 10px; padding: 9px 10px; font-size: .8rem; }
+.trend-reclaim-signal .tv-link { margin-top: 10px; }
 
 footer { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--line); font-size: .77rem; }
 footer p { margin-bottom: 8px; }

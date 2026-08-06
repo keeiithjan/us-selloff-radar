@@ -166,18 +166,20 @@ function marketTradingViewUrl(symbol) {
   return `https://tw.tradingview.com/chart/?${query.toString()}`;
 }
 
-function makeTradingViewLink(item, interval, label = "TradingView 圖") {
+function makeTradingViewLink(item, interval) {
   const link = document.createElement("a");
   link.className = "tv-link";
   link.href = tradingViewUrl(item, interval);
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  link.textContent = label;
+  link.textContent = "T";
+  link.title = "在 TradingView 開啟圖表";
+  link.setAttribute("aria-label", "在 TradingView 開啟圖表");
   return link;
 }
 
 function industryText(industry) {
-  return `產業：${industry || "未分類"}`;
+  return `產業｜${industry || "未分類"}`;
 }
 
 function displayMarket(market) {
@@ -374,7 +376,9 @@ function makeFutureCard(future, index = 0, motion = {}) {
     link.href = marketTradingViewUrl(future.tradingview_symbol);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "TradingView 圖";
+    link.textContent = "T";
+    link.title = "在 TradingView 開啟圖表";
+    link.setAttribute("aria-label", "在 TradingView 開啟圖表");
     card.append(link);
   }
   return card;
@@ -489,15 +493,10 @@ function makeSequentialSignal(signal, interval) {
   const heading = document.createElement("div");
   const ticker = document.createElement("h4");
   ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
-  const time = document.createElement("p");
-  time.className = "exchange";
-  time.textContent = [displayMarket(signal.market), signal.exchange]
-    .filter(Boolean)
-    .join(" · ");
   const age = document.createElement("p");
   age.className = "signal-age";
   age.textContent = Number(signal.age_bars) === 0 ? "最新已完成 K 棒" : `${signal.age_bars} 根 K 棒前`;
-  heading.append(ticker, time, age);
+  heading.append(ticker, age);
 
   const price = document.createElement("strong");
   price.className = "signal-price";
@@ -586,13 +585,10 @@ function makeTrendReclaimSignal(signal, interval) {
   const heading = document.createElement("div");
   const ticker = document.createElement("h4");
   ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
-  const market = document.createElement("p");
-  market.className = "exchange";
-  market.textContent = [displayMarket(signal.market), signal.exchange].filter(Boolean).join(" · ");
   const status = document.createElement("p");
   status.className = "reclaim-status";
   status.textContent = Number(signal.age_bars) === 0 ? "最新回站白線" : `${signal.age_bars} 根 K 棒前回站白線`;
-  heading.append(ticker, market, status);
+  heading.append(ticker, status);
 
   const price = document.createElement("strong");
   price.className = "signal-price";

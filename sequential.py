@@ -41,6 +41,21 @@ BINANCE_DATA_URL = "https://data-api.binance.vision/api/v3"
 TWSE_COMPANY_INFO_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_COMPANY_INFO_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 
+# TWSE / TPEx publish two-digit industry codes in their company datasets.
+# Convert them before writing JSON so users see a meaningful sector, not "24".
+TAIWAN_INDUSTRY_NAMES = {
+    "01": "水泥工業", "02": "食品工業", "03": "塑膠工業", "04": "紡織纖維",
+    "05": "電機機械", "06": "電器電纜", "07": "化學工業", "08": "玻璃陶瓷",
+    "09": "造紙工業", "10": "鋼鐵工業", "11": "橡膠工業", "12": "汽車工業",
+    "13": "電子工業", "14": "建材營造", "15": "航運業", "16": "觀光餐旅",
+    "17": "金融保險", "18": "貿易百貨", "19": "綜合", "20": "其他",
+    "21": "化學工業", "22": "生技醫療業", "23": "油電燃氣業", "24": "半導體業",
+    "25": "電腦及週邊設備業", "26": "光電業", "27": "通信網路業", "28": "電子零組件業",
+    "29": "電子通路業", "30": "資訊服務業", "31": "其他電子業", "32": "文化創意業",
+    "33": "農業科技業", "34": "電子商務業", "35": "綠能環保業", "36": "數位雲端業",
+    "37": "運動休閒業", "38": "居家生活業",
+}
+
 
 @dataclass(frozen=True)
 class Timeframe:
@@ -182,7 +197,10 @@ def fetch_taiwan_industries() -> dict[str, str]:
             if not isinstance(row, dict):
                 continue
             code = str(row.get("公司代號") or row.get("證券代號") or "").strip().upper()
-            industry = str(row.get("產業別") or "").strip()
+            raw_industry = str(row.get("產業別") or "").strip()
+            industry = TAIWAN_INDUSTRY_NAMES.get(raw_industry, raw_industry)
+            if re.fullmatch(r"\d{1,2}", raw_industry) and raw_industry not in TAIWAN_INDUSTRY_NAMES:
+                industry = "未分類"
             if re.fullmatch(r"\d{4,6}[A-Z]?", code) and industry:
                 industries[code] = industry
     return industries
