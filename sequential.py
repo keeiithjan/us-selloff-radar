@@ -616,9 +616,10 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
 
     White is AI Momentum's ``kernClose`` and yellow is its ``zoneMid``.  The
     death-cross candle, white line, and yellow line must *all* be below the
-    lower EMA 50/100 ribbon edge.  A long reclaim needs a completed close to
-    cross above white while white remains below yellow.  This function never
-    emits a short signal.
+    lower EMA 50/100 ribbon edge.  They must remain below that edge throughout
+    the setup; re-entering the ribbon invalidates the pending setup.  A long
+    reclaim needs a completed close to cross above white while white remains
+    below yellow.  This function never emits a short signal.
     """
     if features is None or len(features) < 2:
         return []
@@ -647,12 +648,15 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
         close = float(row["close"])
         prior_close = float(previous["close"])
         lower_edge = float(row["trend_lower_edge"])
-        cross_below_ribbon = max(close, white, yellow) < lower_edge
+        fully_below_ribbon = max(close, white, yellow) < lower_edge
         is_death_cross = prior_white >= prior_yellow and white < yellow
-        if is_death_cross and cross_below_ribbon:
+        if is_death_cross and fully_below_ribbon:
             active_death_cross = position
 
         if active_death_cross is None:
+            continue
+        if not fully_below_ribbon:
+            active_death_cross = None
             continue
         if position - active_death_cross > TREND_RECLAIM_DEATH_LOOKBACK_BARS:
             active_death_cross = None

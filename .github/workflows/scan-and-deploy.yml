@@ -59,8 +59,13 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
+          # A re-run of the same workflow has a new run_attempt.  Keep its
+          # artifact separate so deploy-pages never sees duplicate candidates.
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: .
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}

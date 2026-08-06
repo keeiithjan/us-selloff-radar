@@ -611,7 +611,7 @@ function makeTrendReclaimSignal(signal, interval) {
 
   const rule = document.createElement("p");
   rule.className = "reclaim-rule";
-  rule.textContent = `趨勢帶下方白／黃死亡交叉：${signal.death_cross_time || "資料不足"}｜${Number(signal.death_cross_bars_ago || 0)} 根 K 後收盤站回白線`;
+  rule.textContent = `全程位於 TT 趨勢帶下方｜白／黃死亡交叉：${signal.death_cross_time || "資料不足"}｜${Number(signal.death_cross_bars_ago || 0)} 根 K 後收盤站回白線`;
 
   const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
     .map(Number)
