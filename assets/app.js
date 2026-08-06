@@ -502,7 +502,12 @@ function makeSequentialSignal(signal, interval) {
   const price = document.createElement("strong");
   price.className = "signal-price";
   price.textContent = formatCurrency(signal.last_price);
-  top.append(heading, price);
+  const quote = document.createElement("div");
+  quote.className = "signal-quote";
+  quote.append(price);
+  const todayChange = makeTodayChange(signal.today_change_pct);
+  if (todayChange) quote.append(todayChange);
+  top.append(heading, quote);
 
   const details = document.createElement("div");
   details.className = "signal-details";
@@ -511,8 +516,6 @@ function makeSequentialSignal(signal, interval) {
   const occurred = document.createElement("span");
   occurred.textContent = `訊號產生：${signal.bar_time_et || "資料不足"}`;
   details.append(industry, occurred);
-  const todayChange = makeTodayChange(signal.today_change_pct);
-  if (todayChange) details.append(todayChange);
 
   const labels = document.createElement("div");
   labels.className = "signal-labels";
@@ -594,7 +597,12 @@ function makeTrendReclaimSignal(signal, interval) {
   const price = document.createElement("strong");
   price.className = "signal-price";
   price.textContent = formatCurrency(signal.last_price);
-  top.append(heading, price);
+  const quote = document.createElement("div");
+  quote.className = "signal-quote";
+  quote.append(price);
+  const todayChange = makeTodayChange(signal.today_change_pct);
+  if (todayChange) quote.append(todayChange);
+  top.append(heading, quote);
 
   const details = document.createElement("div");
   details.className = "signal-details";
@@ -603,8 +611,6 @@ function makeTrendReclaimSignal(signal, interval) {
   const occurred = document.createElement("span");
   occurred.textContent = `回站時間：${signal.bar_time_et || "資料不足"}`;
   details.append(industry, occurred);
-  const todayChange = makeTodayChange(signal.today_change_pct);
-  if (todayChange) details.append(todayChange);
 
   const rule = document.createElement("p");
   rule.className = "reclaim-rule";

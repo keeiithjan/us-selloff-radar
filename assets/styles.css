@@ -415,13 +415,14 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .sequential-signal.sell { border-left: 3px solid var(--danger); }
 .sequential-signal h4 { margin: 0; font-size: .98rem; letter-spacing: -.015em; }
 .signal-price { color: var(--ink); font-size: .88rem; font-weight: 700; white-space: nowrap; }
+.signal-quote { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .signal-age { margin: 7px 0 0; color: var(--accent); font-size: .72rem; font-weight: 800; }
 .signal-details { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .signal-details span { padding: 3px 6px; border: 1px solid rgb(117 169 191 / 22%); border-radius: 4px; background: rgb(117 169 191 / 7%); }
-.signal-details .today-change { font-weight: 800; }
-.signal-details .today-change.up { border-color: rgb(32 224 191 / 34%); background: var(--accent-soft); color: #7bffe5; }
-.signal-details .today-change.down { border-color: rgb(255 95 119 / 34%); background: var(--danger-soft); color: #ffadb9; }
-.signal-details .today-change.flat { color: var(--ink); }
+.today-change { padding: 3px 6px; border: 1px solid rgb(117 169 191 / 22%); border-radius: 4px; background: rgb(117 169 191 / 7%); font-size: .68rem; font-weight: 800; white-space: nowrap; }
+.today-change.up { border-color: rgb(32 224 191 / 34%); background: var(--accent-soft); color: #7bffe5; }
+.today-change.down { border-color: rgb(255 95 119 / 34%); background: var(--danger-soft); color: #ffadb9; }
+.today-change.flat { color: var(--ink); }
 .signal-sparkline { height: 48px; margin: 10px 0 4px; }
 .signal-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
 .signal-labels span { padding: 4px 7px; border: 1px solid rgb(32 224 191 / 23%); border-radius: 999px; background: var(--accent-soft); color: #7bffe5; font-size: .7rem; font-weight: 800; }
