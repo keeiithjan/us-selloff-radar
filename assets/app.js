@@ -17,6 +17,10 @@ const elements = {
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
+  taiwanSentimentUpdated: document.querySelector("#taiwan-sentiment-updated"),
+  taiwanSentimentKpis: document.querySelector("#taiwan-sentiment-kpis"),
+  taiwanSentimentChart: document.querySelector("#taiwan-sentiment-chart"),
+  taiwanSentimentSource: document.querySelector("#taiwan-sentiment-source"),
   premarketSummary: document.querySelector("#premarket-summary"),
   premarketMovers: document.querySelector("#premarket-movers"),
   premarketEmpty: document.querySelector("#premarket-empty"),
@@ -443,6 +447,238 @@ function makePremarketCard(mover, motion = {}) {
   return card;
 }
 
+const sentimentMetrics = [
+  {
+    id: "index",
+    label: "加權指數",
+    key: "index_close",
+    changeKey: "index_daily_change",
+    format: (value) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(Number(value)),
+    unit: "點",
+  },
+  {
+    id: "short",
+    label: "外資台指期空單",
+    key: "foreign_short_open_interest",
+    changeKey: "foreign_short_daily_change",
+    format: (value) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(Number(value)),
+    unit: "口・未平倉",
+  },
+  {
+    id: "margin",
+    label: "上市融資餘額",
+    key: "margin_balance_100m",
+    changeKey: "margin_daily_change_100m",
+    format: (value) => Number(value).toLocaleString("zh-TW", { maximumFractionDigits: 1 }),
+    unit: "億元",
+  },
+  {
+    id: "vix",
+    label: "VIX",
+    key: "vix_close",
+    changeKey: "vix_daily_change",
+    format: (value) => Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 }),
+    unit: "美股日線收盤",
+  },
+];
+
+function sentimentPoints(payload) {
+  const points = Array.isArray(payload && payload.points) ? payload.points : [];
+  return points.filter((point) => sentimentMetrics.every((metric) => Number.isFinite(Number(point[metric.key]))));
+}
+
+function sentimentDelta(value, metric) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "日增減 —";
+  const sign = number > 0 ? "+" : "";
+  return `日增減 ${sign}${metric.format(number)} ${metric.id === "index" ? "點" : metric.id === "short" ? "口" : metric.id === "margin" ? "億" : ""}`.trim();
+}
+
+function makeSentimentKpi(metric, point) {
+  const card = document.createElement("article");
+  card.className = `sentiment-kpi ${metric.id}`;
+  const label = document.createElement("p");
+  label.textContent = metric.label;
+  const value = document.createElement("strong");
+  value.className = "matrix-number";
+  value.textContent = metric.format(point[metric.key]);
+  const unit = document.createElement("span");
+  unit.className = "sentiment-unit";
+  unit.textContent = metric.unit;
+  const delta = document.createElement("small");
+  const deltaValue = Number(point[metric.changeKey]);
+  delta.className = `sentiment-delta ${deltaValue > 0 ? "up" : deltaValue < 0 ? "down" : "flat"}`;
+  delta.textContent = sentimentDelta(deltaValue, metric);
+  card.append(label, value, unit, delta);
+  return card;
+}
+
+function formatSentimentTooltipValue(metric, point) {
+  const value = `${metric.format(point[metric.key])} ${metric.unit}`;
+  const delta = sentimentDelta(point[metric.changeKey], metric);
+  return `${value}｜${delta}`;
+}
+
+function makeTaiwanSentimentChart(points) {
+  if (points.length < 2) {
+    const empty = document.createElement("p");
+    empty.className = "sentiment-empty";
+    empty.textContent = "等待交易所公布足夠的日資料後建立關聯圖。";
+    return empty;
+  }
+
+  const namespace = "http://www.w3.org/2000/svg";
+  const width = 1000;
+  const height = 360;
+  const plot = { left: 64, right: 24, top: 22, bottom: 46 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = height - plot.top - plot.bottom;
+  const normalized = new Map();
+  for (const metric of sentimentMetrics) {
+    const baseline = Number(points[0][metric.key]);
+    normalized.set(metric.id, points.map((point) => (Number(point[metric.key]) / baseline) * 100));
+  }
+  const allValues = [...normalized.values()].flat();
+  const low = Math.min(...allValues);
+  const high = Math.max(...allValues);
+  const padding = Math.max((high - low) * 0.14, 1.8);
+  const axisMin = Math.floor((low - padding) * 2) / 2;
+  const axisMax = Math.ceil((high + padding) * 2) / 2;
+  const xFor = (index) => plot.left + (index / (points.length - 1)) * plotWidth;
+  const yFor = (value) => plot.top + ((axisMax - value) / (axisMax - axisMin)) * plotHeight;
+
+  const wrap = document.createElement("div");
+  wrap.className = "sentiment-chart-canvas";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "台股槓桿與風險的標準化關聯圖，游標可查看各日原始數值。 ");
+
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const value = axisMin + ((axisMax - axisMin) * tick) / 4;
+    const y = yFor(value);
+    const line = document.createElementNS(namespace, "line");
+    line.setAttribute("class", "sentiment-grid");
+    line.setAttribute("x1", String(plot.left));
+    line.setAttribute("x2", String(width - plot.right));
+    line.setAttribute("y1", String(y));
+    line.setAttribute("y2", String(y));
+    svg.append(line);
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("class", "sentiment-axis-label");
+    label.setAttribute("x", "8");
+    label.setAttribute("y", String(y + 4));
+    label.textContent = value.toFixed(1);
+    svg.append(label);
+  }
+
+  const xLabelIndexes = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])];
+  for (const index of xLabelIndexes) {
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("class", "sentiment-axis-label sentiment-date-label");
+    label.setAttribute("x", String(xFor(index)));
+    label.setAttribute("y", String(height - 15));
+    label.textContent = String(points[index].date || "").slice(5).replace("-", "/");
+    svg.append(label);
+  }
+
+  const paths = new Map();
+  const dots = new Map();
+  for (const metric of sentimentMetrics) {
+    const values = normalized.get(metric.id) || [];
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("class", `sentiment-line ${metric.id}`);
+    path.setAttribute("d", values.map((value, index) => `${index ? "L" : "M"}${xFor(index)} ${yFor(value)}`).join(" "));
+    svg.append(path);
+    paths.set(metric.id, values);
+    const dot = document.createElementNS(namespace, "circle");
+    dot.setAttribute("class", `sentiment-hover-dot ${metric.id}`);
+    dot.setAttribute("r", "5");
+    dot.hidden = true;
+    svg.append(dot);
+    dots.set(metric.id, dot);
+  }
+
+  const hoverLine = document.createElementNS(namespace, "line");
+  hoverLine.setAttribute("class", "sentiment-hover-line");
+  hoverLine.setAttribute("y1", String(plot.top));
+  hoverLine.setAttribute("y2", String(height - plot.bottom));
+  hoverLine.hidden = true;
+  svg.append(hoverLine);
+  const capture = document.createElementNS(namespace, "rect");
+  capture.setAttribute("x", String(plot.left));
+  capture.setAttribute("y", String(plot.top));
+  capture.setAttribute("width", String(plotWidth));
+  capture.setAttribute("height", String(plotHeight));
+  capture.setAttribute("fill", "transparent");
+  capture.setAttribute("class", "sentiment-capture");
+  svg.append(capture);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "sentiment-tooltip";
+  tooltip.hidden = true;
+  const showPoint = (index, clientX) => {
+    const point = points[index];
+    const x = xFor(index);
+    hoverLine.hidden = false;
+    hoverLine.setAttribute("x1", String(x));
+    hoverLine.setAttribute("x2", String(x));
+    for (const metric of sentimentMetrics) {
+      const dot = dots.get(metric.id);
+      const values = paths.get(metric.id) || [];
+      dot.hidden = false;
+      dot.setAttribute("cx", String(x));
+      dot.setAttribute("cy", String(yFor(values[index])));
+    }
+    const date = document.createElement("strong");
+    date.textContent = point.date || "";
+    const lines = sentimentMetrics.map((metric) => {
+      const line = document.createElement("span");
+      line.className = metric.id;
+      line.textContent = `${metric.label}：${formatSentimentTooltipValue(metric, point)}`;
+      return line;
+    });
+    tooltip.replaceChildren(date, ...lines);
+    tooltip.hidden = false;
+    const bounds = svg.getBoundingClientRect();
+    const percentage = clientX === undefined ? (x / width) * 100 : ((clientX - bounds.left) / bounds.width) * 100;
+    tooltip.style.left = `${Math.max(8, Math.min(92, percentage))}%`;
+  };
+  const hidePoint = () => {
+    tooltip.hidden = true;
+    hoverLine.hidden = true;
+    for (const dot of dots.values()) dot.hidden = true;
+  };
+  capture.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left - (plot.left / width) * bounds.width) / ((plotWidth / width) * bounds.width)));
+    showPoint(Math.round(relative * (points.length - 1)), event.clientX);
+  });
+  capture.addEventListener("pointerleave", hidePoint);
+  wrap.append(svg, tooltip);
+  return wrap;
+}
+
+function renderTaiwanSentiment(payload) {
+  const points = sentimentPoints(payload);
+  elements.taiwanSentimentUpdated.textContent = points.length
+    ? `${payload.label || "日資料"}・最新 ${points.at(-1).date}`
+    : "資料更新中";
+  elements.taiwanSentimentSource.textContent = payload && payload.source ? `${payload.source} 圖表尺度為各序列首日＝100；移動游標可看原始值。` : "";
+  if (points.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "sentiment-empty";
+    empty.textContent = "等待期交所、證交所與日線資料同步後顯示。";
+    elements.taiwanSentimentKpis.replaceChildren();
+    elements.taiwanSentimentChart.replaceChildren(empty);
+    return;
+  }
+  const latest = points.at(-1);
+  elements.taiwanSentimentKpis.replaceChildren(...sentimentMetrics.map((metric) => makeSentimentKpi(metric, latest)));
+  elements.taiwanSentimentChart.replaceChildren(makeTaiwanSentimentChart(points));
+}
+
 function renderMarketPulse(payload) {
   const futures = Array.isArray(payload.futures) ? payload.futures : [];
   elements.futuresStrip.replaceChildren(
@@ -455,6 +691,8 @@ function renderMarketPulse(payload) {
   marketUpdatedAt = payload.updated_at_utc || null;
   refreshMarketAge();
   if (!marketAgeTimer) marketAgeTimer = window.setInterval(refreshMarketAge, 1_000);
+
+  renderTaiwanSentiment(payload.taiwan_sentiment || {});
 
   const premarket = payload.premarket || {};
   const movers = Array.isArray(premarket.movers) ? premarket.movers : [];

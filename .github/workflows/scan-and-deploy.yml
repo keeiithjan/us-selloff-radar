@@ -41,6 +41,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Restore Taiwan sentiment history
+        uses: actions/cache/restore@v4
+        with:
+          path: data/taiwan_sentiment_history.json
+          key: taiwan-sentiment-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            taiwan-sentiment-${{ github.ref_name }}-
+
       - name: Install scanner dependencies
         run: python -m pip install -r requirements.txt
 
@@ -49,6 +57,13 @@ jobs:
 
       - name: Refresh market pulse data
         run: python market_pulse.py
+
+      - name: Save Taiwan sentiment history
+        if: ${{ always() && hashFiles('data/taiwan_sentiment_history.json') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: data/taiwan_sentiment_history.json
+          key: taiwan-sentiment-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Refresh Sequential multi-timeframe data
         run: python sequential.py
