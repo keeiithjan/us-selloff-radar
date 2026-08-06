@@ -277,6 +277,7 @@ def premarket_mover(
         "direction": "up" if change_pct > 0 else "down",
         "bar_time_et": latest_time.strftime("%Y-%m-%d %H:%M ET"),
         "occurred_at_utc": latest_time.tz_convert(UTC).isoformat(),
+        "sparkline": compact_intraday_closes(premarket, latest_time),
     }
 
 
@@ -353,6 +354,24 @@ def download_binance_tickers() -> dict[str, dict[str, object]]:
         for item in payload
         if isinstance(item, dict) and item.get("symbol")
     }
+
+
+def download_binance_sparkline(contract_symbol: str) -> list[float]:
+    """Return the latest 60 one-minute closes for a displayed Binance card."""
+    url = (
+        "https://fapi.binance.com/fapi/v1/klines?symbol="
+        f"{contract_symbol}&interval=1m&limit=60"
+    )
+    payload = download_binance_json(url)
+    if not isinstance(payload, list):
+        return []
+    closes: list[float] = []
+    for candle in payload:
+        try:
+            closes.append(round(float(candle[4]), 4))
+        except (IndexError, TypeError, ValueError):
+            continue
+    return closes
 
 
 def binance_equity_movers(
@@ -466,6 +485,10 @@ def main() -> None:
         errors.append("盤前指標股資料暫時無法取得")
 
     movers.sort(key=lambda item: abs(float(item["change_pct"])), reverse=True)
+    selected_movers = movers[:max_movers]
+    for mover in selected_movers:
+        if mover.get("source") == "Binance USDⓈ-M public API":
+            mover["sparkline"] = download_binance_sparkline(str(mover["symbol"]))
     market_open = now.astimezone(NEW_YORK)
     premarket_active = (
         market_open.weekday() < 5 and PREMARKET_OPEN <= market_open.time() < REGULAR_OPEN
@@ -480,7 +503,7 @@ def main() -> None:
                 "binance_equity_scanned_symbols": len(binance_contracts),
                 "threshold_pct": threshold_pct,
                 "scanned_symbols": len(frames),
-                "movers": movers[:max_movers],
+                "movers": selected_movers,
             },
             "source": "Yahoo Finance via yfinance；期貨與盤前報價可能延遲。",
             "errors": errors,

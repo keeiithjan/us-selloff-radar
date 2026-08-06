@@ -119,6 +119,14 @@ function animateNumber(node, from, to, formatter) {
   window.requestAnimationFrame(tick);
 }
 
+function initialNumberStart(value, direction, percentage = false) {
+  const target = Number(value);
+  if (!Number.isFinite(target)) return target;
+  if (percentage) return 0;
+  const offset = direction === "down" ? 1.012 : 0.988;
+  return target * offset;
+}
+
 function formatTaipei(value) {
   return new Intl.DateTimeFormat("zh-TW", {
     dateStyle: "short",
@@ -148,16 +156,16 @@ function tradingViewUrl(item, interval) {
   const chartSymbol = item.tradingview_symbol || `${exchange}:${symbol}`;
   const query = new URLSearchParams({ symbol: chartSymbol });
   if (interval) query.set("interval", interval);
-  return `https://www.tradingview.com/chart/?${query.toString()}`;
+  return `https://tw.tradingview.com/chart/?${query.toString()}`;
 }
 
 function marketTradingViewUrl(symbol) {
   const query = new URLSearchParams({ symbol: String(symbol || "") });
   query.set("interval", "5");
-  return `https://www.tradingview.com/chart/?${query.toString()}`;
+  return `https://tw.tradingview.com/chart/?${query.toString()}`;
 }
 
-function makeTradingViewLink(item, interval, label = "在 TradingView 開啟圖表") {
+function makeTradingViewLink(item, interval, label = "繁中 TradingView") {
   const link = document.createElement("a");
   link.className = "tv-link";
   link.href = tradingViewUrl(item, interval);
@@ -184,8 +192,11 @@ function makeAlertCard(alert, motion = {}) {
   const drop = document.createElement("div");
   drop.className = "drop matrix-number";
   drop.textContent = `${Number(alert.price_change_pct).toFixed(2)}%`;
-  if (motion.isUpdated) {
-    animateNumber(drop, motion.previous.price_change_pct, alert.price_change_pct, (value) => `${value.toFixed(2)}%`);
+  if (motion.isUpdated || motion.enter) {
+    const start = motion.isUpdated
+      ? motion.previous.price_change_pct
+      : initialNumberStart(alert.price_change_pct, "down", true);
+    animateNumber(drop, start, alert.price_change_pct, (value) => `${value.toFixed(2)}%`);
   }
   top.append(name, drop);
 
@@ -207,11 +218,8 @@ function renderSelloff(payload) {
   elements.status.style.color = open ? "var(--accent)" : "var(--muted)";
   const priorCount = motionState.alertCount;
   elements.count.classList.add("matrix-number");
-  if (motionState.hasAlerts && Number.isFinite(priorCount)) {
-    animateNumber(elements.count, priorCount, alerts.length, (value) => String(Math.round(value)));
-  } else {
-    elements.count.textContent = String(alerts.length);
-  }
+  const countStart = motionState.hasAlerts && Number.isFinite(priorCount) ? priorCount : 0;
+  animateNumber(elements.count, countStart, alerts.length, (value) => String(Math.round(value)));
   elements.updated.textContent = payload.updated_at_utc ? formatTaipei(payload.updated_at_utc) : "—";
   elements.coverage.textContent = `已掃描 ${String(payload.scanned_symbols || 0)} 檔`;
   elements.source.textContent = payload.source || "";
@@ -291,19 +299,31 @@ function makeFutureCard(future, index = 0, motion = {}) {
   const price = document.createElement("strong");
   price.className = "future-price matrix-number";
   price.textContent = available ? formatMarketPrice(future.last_price, future.currency) : "—";
-  if (available && motion.isUpdated) {
+  if (available && (motion.isUpdated || motion.enter)) {
+    const start = motion.isUpdated
+      ? motion.previous.last_price
+      : initialNumberStart(future.last_price, direction);
     animateNumber(
       price,
-      motion.previous.last_price,
+      start,
       future.last_price,
       (value) => formatMarketPrice(value, future.currency)
     );
   }
   const movement = document.createElement("p");
-  movement.className = "future-movement";
+  movement.className = "future-movement matrix-number";
   movement.textContent = available
     ? `${formatSigned(future.change, future.currency === "TWD" ? 0 : 2)} · ${formatSigned(change)}%`
     : "報價暫時無法取得";
+  if (available && (motion.isUpdated || motion.enter)) {
+    const start = motion.isUpdated
+      ? motion.previous.change
+      : initialNumberStart(future.change, direction, true);
+    animateNumber(movement, start, future.change, (value) => {
+      const percentage = future.change ? (value / future.change) * change : change;
+      return `${formatSigned(value, future.currency === "TWD" ? 0 : 2)} · ${formatSigned(percentage)}%`;
+    });
+  }
   const metadata = document.createElement("p");
   metadata.className = "future-meta";
   metadata.textContent = future.fallback_quote
@@ -322,7 +342,7 @@ function makeFutureCard(future, index = 0, motion = {}) {
     link.href = marketTradingViewUrl(future.tradingview_symbol);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "查看圖表";
+    link.textContent = "繁中圖表";
     card.append(link);
   }
   return card;
@@ -342,8 +362,9 @@ function refreshMarketAge() {
 }
 
 function makePremarketCard(mover, motion = {}) {
+  const direction = mover.direction === "up" ? "up" : "down";
   const card = document.createElement("article");
-  card.className = `premarket-card ${mover.direction === "up" ? "up" : "down"}${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
+  card.className = `premarket-card ${direction}${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
   const top = document.createElement("div");
   top.className = "alert-top";
   const name = document.createElement("div");
@@ -357,16 +378,32 @@ function makePremarketCard(mover, motion = {}) {
   const change = document.createElement("strong");
   change.className = "premarket-change matrix-number";
   change.textContent = `${formatSigned(mover.change_pct)}%`;
-  if (motion.isUpdated) {
-    animateNumber(change, motion.previous.change_pct, mover.change_pct, (value) => `${formatSigned(value)}%`);
+  if (motion.isUpdated || motion.enter) {
+    const start = motion.isUpdated
+      ? motion.previous.change_pct
+      : initialNumberStart(mover.change_pct, mover.direction, true);
+    animateNumber(change, start, mover.change_pct, (value) => `${formatSigned(value)}%`);
   }
   top.append(name, change);
 
   const details = document.createElement("p");
   details.className = "premarket-details";
   const reference = mover.reference_label || "昨收";
-  details.textContent = `最新 ${formatMarketPrice(mover.last_price, "USD")}｜${reference} ${formatMarketPrice(mover.previous_close, "USD")}`;
-  card.append(top, details, makeTradingViewLink(mover, "5", "在 TradingView 檢視"));
+  const latestLabel = document.createTextNode("最新 ");
+  const latestPrice = document.createElement("strong");
+  latestPrice.className = "premarket-price matrix-number";
+  latestPrice.textContent = formatMarketPrice(mover.last_price, "USD");
+  if (motion.isUpdated || motion.enter) {
+    const start = motion.isUpdated
+      ? motion.previous.last_price
+      : initialNumberStart(mover.last_price, direction);
+    animateNumber(latestPrice, start, mover.last_price, (value) => formatMarketPrice(value, "USD"));
+  }
+  details.append(latestLabel, latestPrice, document.createTextNode(`｜${reference} ${formatMarketPrice(mover.previous_close, "USD")}`));
+  const sparkline = makeSparkline(mover.sparkline, direction, motion.enter);
+  card.append(top, details);
+  if (sparkline) card.append(sparkline);
+  card.append(makeTradingViewLink(mover, "5", "繁中圖表"));
   return card;
 }
 
@@ -459,9 +496,9 @@ function makeSequentialSignal(signal, interval) {
     confirmation.textContent = momentum.bearish_confirmed
       ? `空方動能確認：符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`
       : `空方動能確認：未完整符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`;
-    card.append(top, labels, confirmation, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
+    card.append(top, labels, confirmation, makeTradingViewLink(signal, interval, "繁中圖表"));
   } else {
-    card.append(top, labels, makeTradingViewLink(signal, interval, "在 TradingView 檢視"));
+    card.append(top, labels, makeTradingViewLink(signal, interval, "繁中圖表"));
   }
   return card;
 }

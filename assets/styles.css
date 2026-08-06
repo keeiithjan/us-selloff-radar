@@ -154,11 +154,14 @@ body {
 .future-movement { margin: 7px 0 0; color: var(--muted); font-size: .78rem; font-weight: 750; }
 .future-card.up .future-movement { color: var(--accent); }
 .future-card.down .future-movement { color: var(--danger); }
-.future-sparkline { height: 38px; margin: 11px -2px 1px; overflow: hidden; border-top: 1px solid rgb(117 169 191 / 15%); border-bottom: 1px solid rgb(117 169 191 / 15%); background: repeating-linear-gradient(90deg, transparent 0 17px, rgb(117 169 191 / 8%) 17px 18px); }
-.future-sparkline svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.future-sparkline { position: relative; height: 38px; margin: 11px -2px 1px; overflow: hidden; border-top: 1px solid rgb(117 169 191 / 15%); border-bottom: 1px solid rgb(117 169 191 / 15%); background: repeating-linear-gradient(90deg, transparent 0 17px, rgb(117 169 191 / 8%) 17px 18px); }
+.future-sparkline::after { position: absolute; z-index: 2; top: 0; bottom: 0; width: 18%; content: ""; pointer-events: none; background: linear-gradient(90deg, transparent, rgb(104 239 255 / 26%), transparent); animation: chart-scan 3.4s linear infinite; }
+@keyframes chart-scan { from { left: -22%; } to { left: 108%; } }
+.future-sparkline svg { position: relative; z-index: 1; display: block; width: 100%; height: 100%; overflow: visible; }
 .sparkline-area { fill: rgb(80 113 98 / 9%); }
 .sparkline-line { fill: none; stroke: #b8cfda; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; vector-effect: non-scaling-stroke; }
-.sparkline-last { fill: #b8cfda; stroke: var(--surface); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.sparkline-last { fill: #b8cfda; stroke: var(--surface); stroke-width: 1.25; vector-effect: non-scaling-stroke; animation: last-price-pulse 1.45s ease-in-out infinite; }
+@keyframes last-price-pulse { 50% { opacity: .38; filter: drop-shadow(0 0 4px currentColor); } }
 .future-sparkline.up .sparkline-area { fill: rgb(35 115 92 / 13%); }
 .future-sparkline.up .sparkline-line { stroke: var(--accent); filter: drop-shadow(0 0 2px rgb(32 224 191 / 75%)); }
 .future-sparkline.up .sparkline-last { fill: var(--accent); }
@@ -177,6 +180,8 @@ body {
   font-feature-settings: "tnum" 1, "zero" 1;
 }
 
+.matrix-number:not(.is-ticking) { animation: matrix-idle 2.8s ease-in-out infinite; }
+@keyframes matrix-idle { 0%, 100% { text-shadow: 0 0 0 transparent; transform: translateY(0); } 50% { text-shadow: 0 0 10px rgb(54 185 255 / 24%); transform: translateY(-1px); } }
 .matrix-number.is-ticking { animation: matrix-flicker .13s steps(2, end) 5; }
 @keyframes matrix-flicker {
   0%, 100% { filter: none; text-shadow: none; }
@@ -343,7 +348,7 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .stat { min-width: 0; padding: 10px 11px; border: 1px solid rgb(255 95 119 / 16%); border-radius: 6px; background: var(--danger-soft); }
 .stat span { display: block; color: #f1a6b2; font-size: .71rem; }
 .stat strong { display: block; margin-top: 5px; font-size: .92rem; }
-.tv-link { display: inline-flex; justify-content: center; width: 100%; padding: 12px 15px; }
+.tv-link { display: inline-flex; align-items: center; justify-content: center; width: fit-content; min-height: 34px; padding: 7px 10px; font-size: .72rem; letter-spacing: .01em; }
 
 .empty {
   margin: 18px 0;
@@ -454,6 +459,9 @@ footer p { margin-bottom: 8px; }
   .alert-card.is-fresh,
   .future-card.is-fresh .future-price,
   .future-sparkline.is-drawing .sparkline-line,
+  .future-sparkline::after,
+  .sparkline-last,
+  .matrix-number:not(.is-ticking),
   .matrix-number.is-ticking,
   .future-card.is-updated::after,
   .premarket-card.is-updated::after,
