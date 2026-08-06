@@ -184,6 +184,15 @@ function displayMarket(market) {
   return market === "台股個股期貨標的" ? "台股" : (market || "市場");
 }
 
+function makeTodayChange(value) {
+  const percentage = Number(value);
+  if (!Number.isFinite(percentage)) return null;
+  const chip = document.createElement("span");
+  chip.className = `today-change ${percentage > 0 ? "up" : percentage < 0 ? "down" : "flat"}`;
+  chip.textContent = `今日漲跌：${formatSigned(percentage)}%`;
+  return chip;
+}
+
 function makeAlertCard(alert, motion = {}) {
   const card = document.createElement("article");
   card.className = `alert-card${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
@@ -502,6 +511,8 @@ function makeSequentialSignal(signal, interval) {
   const occurred = document.createElement("span");
   occurred.textContent = `訊號產生：${signal.bar_time_et || "資料不足"}`;
   details.append(industry, occurred);
+  const todayChange = makeTodayChange(signal.today_change_pct);
+  if (todayChange) details.append(todayChange);
 
   const labels = document.createElement("div");
   labels.className = "signal-labels";
@@ -592,6 +603,8 @@ function makeTrendReclaimSignal(signal, interval) {
   const occurred = document.createElement("span");
   occurred.textContent = `回站時間：${signal.bar_time_et || "資料不足"}`;
   details.append(industry, occurred);
+  const todayChange = makeTodayChange(signal.today_change_pct);
+  if (todayChange) details.append(todayChange);
 
   const rule = document.createElement("p");
   rule.className = "reclaim-rule";

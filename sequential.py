@@ -735,6 +735,33 @@ def signal_sparkline(
     return closes, max(0, min(position - start, len(closes) - 1))
 
 
+def latest_day_change_pct(
+    frame: pd.DataFrame, timeframe: Timeframe, session: MarketSession
+) -> float | None:
+    """Latest completed session's percentage move from the prior session close."""
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    if len(close) < 2 or not np.isfinite(float(close.iloc[-1])):
+        return None
+
+    if timeframe.duration is None:
+        prior_close = float(close.iloc[-2])
+    else:
+        index = pd.DatetimeIndex(frame.index)
+        if index.tz is None:
+            index = index.tz_localize(session.timezone)
+        else:
+            index = index.tz_convert(session.timezone)
+        earlier_positions = np.flatnonzero(index.date < index[-1].date())
+        if len(earlier_positions) == 0:
+            return None
+        prior_close = float(close.iloc[int(earlier_positions[-1])])
+
+    latest_close = float(close.iloc[-1])
+    if not np.isfinite(prior_close) or prior_close == 0:
+        return None
+    return round((latest_close / prior_close - 1) * 100, 4)
+
+
 def collect_signals(
     us_instruments: list[Instrument],
     taiwan_underlyings: dict[str, str],
@@ -758,6 +785,7 @@ def collect_signals(
         scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
         _, events = sequential_history(frame)
         latest_completed.append((pd.Timestamp(frame.index[-1]), instrument.session))
+        today_change_pct = latest_day_change_pct(frame, timeframe, instrument.session)
         recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "5"))
         if recent_bars < 1 or recent_bars > 20:
             raise ValueError("RECENT_SIGNAL_BARS 必須介於 1 到 20")
@@ -781,6 +809,7 @@ def collect_signals(
                     "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
                     "age_bars": age_bars,
                     "last_price": round(float(frame["Close"].iloc[position]), 8),
+                    "today_change_pct": today_change_pct,
                     "labels": event["labels"],
                     "side": event["side"],
                     "buy_setup": event["buy_setup"],
@@ -815,6 +844,7 @@ def collect_signals(
                         "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
                         "age_bars": len(frame) - 1 - position,
                         "last_price": round(float(frame["Close"].iloc[position]), 8),
+                        "today_change_pct": today_change_pct,
                         "death_cross_time": format_bar_time(
                             frame.index[death_position], timeframe, instrument.session
                         ),
