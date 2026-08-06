@@ -450,7 +450,7 @@ function makePremarketCard(mover, motion = {}) {
 const sentimentMetrics = [
   {
     id: "index",
-    label: "加權指數",
+    label: "加權指數 TAIEX",
     key: "index_close",
     changeKey: "index_daily_change",
     format: (value) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(Number(value)),
@@ -458,7 +458,7 @@ const sentimentMetrics = [
   },
   {
     id: "short",
-    label: "外資台指期空單",
+    label: "外資台指期未平倉空單",
     key: "foreign_short_open_interest",
     changeKey: "foreign_short_daily_change",
     format: (value) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(Number(value)),
@@ -494,19 +494,22 @@ function sentimentDelta(value, metric) {
   return `日增減 ${sign}${metric.format(number)} ${metric.id === "index" ? "點" : metric.id === "short" ? "口" : metric.id === "margin" ? "億" : ""}`.trim();
 }
 
-function makeSentimentKpi(metric, point) {
+function makeSentimentKpi(metric, point, liveIndex) {
   const card = document.createElement("article");
   card.className = `sentiment-kpi ${metric.id}`;
   const label = document.createElement("p");
-  label.textContent = metric.label;
+  const useLiveIndex = metric.id === "index" && Number.isFinite(Number(liveIndex && liveIndex.price));
+  label.textContent = useLiveIndex ? "加權指數 TAIEX｜最新報價" : metric.label;
   const value = document.createElement("strong");
   value.className = "matrix-number";
-  value.textContent = metric.format(point[metric.key]);
+  value.textContent = metric.format(useLiveIndex ? liveIndex.price : point[metric.key]);
   const unit = document.createElement("span");
   unit.className = "sentiment-unit";
-  unit.textContent = metric.unit;
+  unit.textContent = useLiveIndex && liveIndex.timestamp
+    ? `報價時間：${formatTaipeiTimestamp(liveIndex.timestamp)}`
+    : metric.unit;
   const delta = document.createElement("small");
-  const deltaValue = Number(point[metric.changeKey]);
+  const deltaValue = Number(useLiveIndex ? liveIndex.change : point[metric.changeKey]);
   delta.className = `sentiment-delta ${deltaValue > 0 ? "up" : deltaValue < 0 ? "down" : "flat"}`;
   delta.textContent = sentimentDelta(deltaValue, metric);
   card.append(label, value, unit, delta);
@@ -514,6 +517,7 @@ function makeSentimentKpi(metric, point) {
 }
 
 function formatSentimentTooltipValue(metric, point) {
+  if (!Number.isFinite(Number(point[metric.key]))) return "盤後資料尚未公布";
   const value = `${metric.format(point[metric.key])} ${metric.unit}`;
   const delta = sentimentDelta(point[metric.changeKey], metric);
   return `${value}｜${delta}`;
@@ -660,12 +664,261 @@ function makeTaiwanSentimentChart(points) {
   return wrap;
 }
 
+function formatTaipeiTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "時間待更新";
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function sentimentChartPoints(points, liveIndex) {
+  if (!Number.isFinite(Number(liveIndex && liveIndex.price))) return points;
+  const liveDate = String(liveIndex.date || "");
+  const last = points.at(-1);
+  if (!liveDate || !last) return points;
+  if (liveDate === last.date) {
+    return [...points.slice(0, -1), {
+      ...last,
+      index_close: Number(liveIndex.price),
+      index_daily_change: liveIndex.change,
+      index_live: true,
+    }];
+  }
+  if (liveDate > last.date) {
+    return [...points, {
+      date: liveDate,
+      index_close: Number(liveIndex.price),
+      index_daily_change: liveIndex.change,
+      index_live: true,
+    }];
+  }
+  return points;
+}
+
+function scaleSentimentLane(points, metric) {
+  const values = points
+    .map((point) => Number(point[metric.key]))
+    .filter((value) => Number.isFinite(value));
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const spread = Math.max(maximum - minimum, Math.max(Math.abs(maximum) * 0.035, 1));
+  return { min: minimum - spread * 0.16, max: maximum + spread * 0.16 };
+}
+
+function sentimentLinePath(points, metric, xFor, yFor) {
+  let path = "";
+  let connected = false;
+  for (const point of points) {
+    const value = Number(point[metric.key]);
+    if (!Number.isFinite(value)) {
+      connected = false;
+      continue;
+    }
+    path += `${connected ? "L" : "M"}${xFor(point)} ${yFor(value)} `;
+    connected = true;
+  }
+  return path.trim();
+}
+
+function makeTaiwanRelationshipChart(points, liveIndex) {
+  if (points.length < 2) return makeTaiwanSentimentChart(points);
+
+  const chartPoints = sentimentChartPoints(points, liveIndex);
+  const namespace = "http://www.w3.org/2000/svg";
+  const width = 1200;
+  const height = 650;
+  const plot = { left: 106, right: 100, top: 26, bottom: 50 };
+  const plotWidth = width - plot.left - plot.right;
+  const start = Date.parse(`${chartPoints[0].date}T00:00:00Z`);
+  const end = Date.parse(`${chartPoints.at(-1).date}T00:00:00Z`);
+  const duration = Math.max(end - start, 86_400_000);
+  const xFor = (point) => plot.left + ((Date.parse(`${point.date}T00:00:00Z`) - start) / duration) * plotWidth;
+  const laneSpecs = [
+    { top: 26, height: 202 },
+    { top: 250, height: 88 },
+    { top: 358, height: 88 },
+    { top: 466, height: 88 },
+  ];
+  const lanes = sentimentMetrics.map((metric, index) => {
+    const spec = laneSpecs[index];
+    const scale = scaleSentimentLane(chartPoints, metric);
+    return {
+      metric,
+      ...spec,
+      scale,
+      yFor: (value) => spec.top + ((scale.max - value) / (scale.max - scale.min)) * spec.height,
+    };
+  });
+
+  const wrap = document.createElement("div");
+  wrap.className = "sentiment-chart-canvas relationship-chart";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "加權指數主圖，並以同一時間軸排列外資台指期空單、上市融資餘額和 VIX；游標可查看每個日期的原始值。 ");
+
+  for (const lane of lanes) {
+    const panel = document.createElementNS(namespace, "rect");
+    panel.setAttribute("class", `sentiment-lane ${lane.metric.id}`);
+    panel.setAttribute("x", String(plot.left));
+    panel.setAttribute("y", String(lane.top));
+    panel.setAttribute("width", String(plotWidth));
+    panel.setAttribute("height", String(lane.height));
+    svg.append(panel);
+    for (let tick = 0; tick <= 2; tick += 1) {
+      const value = lane.scale.min + ((lane.scale.max - lane.scale.min) * tick) / 2;
+      const y = lane.yFor(value);
+      const grid = document.createElementNS(namespace, "line");
+      grid.setAttribute("class", "sentiment-grid");
+      grid.setAttribute("x1", String(plot.left));
+      grid.setAttribute("x2", String(width - plot.right));
+      grid.setAttribute("y1", String(y));
+      grid.setAttribute("y2", String(y));
+      svg.append(grid);
+      const axis = document.createElementNS(namespace, "text");
+      axis.setAttribute("class", "sentiment-axis-label");
+      axis.setAttribute("x", String(plot.left - 12));
+      axis.setAttribute("y", String(y + 4));
+      axis.setAttribute("text-anchor", "end");
+      axis.textContent = lane.metric.format(value);
+      svg.append(axis);
+    }
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("class", `sentiment-lane-label ${lane.metric.id}`);
+    label.setAttribute("x", String(plot.left + 13));
+    label.setAttribute("y", String(lane.top + 21));
+    label.textContent = lane.metric.label;
+    svg.append(label);
+    const latest = [...chartPoints].reverse().find((point) => Number.isFinite(Number(point[lane.metric.key])));
+    if (latest) {
+      const current = document.createElementNS(namespace, "text");
+      current.setAttribute("class", `sentiment-lane-value ${lane.metric.id}`);
+      current.setAttribute("x", String(width - plot.right + 12));
+      current.setAttribute("y", String(lane.yFor(Number(latest[lane.metric.key])) + 4));
+      current.textContent = lane.metric.format(latest[lane.metric.key]);
+      svg.append(current);
+    }
+  }
+
+  const months = new Set();
+  const xLabelIndexes = chartPoints.reduce((indexes, point, index) => {
+    const month = Number(String(point.date).slice(5, 7));
+    if ([1, 4, 7, 10].includes(month) && !months.has(month)) {
+      months.add(month);
+      indexes.push(index);
+    }
+    return indexes;
+  }, [0]);
+  if (xLabelIndexes.at(-1) !== chartPoints.length - 1) xLabelIndexes.push(chartPoints.length - 1);
+  for (const index of [...new Set(xLabelIndexes)]) {
+    const label = document.createElementNS(namespace, "text");
+    label.setAttribute("class", "sentiment-axis-label sentiment-date-label");
+    label.setAttribute("x", String(xFor(chartPoints[index])));
+    label.setAttribute("y", String(height - 16));
+    label.textContent = String(chartPoints[index].date || "").slice(0, 7).replace("-", "/");
+    svg.append(label);
+  }
+
+  const dots = new Map();
+  for (const lane of lanes) {
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("class", `sentiment-line ${lane.metric.id}`);
+    path.setAttribute("d", sentimentLinePath(chartPoints, lane.metric, xFor, lane.yFor));
+    svg.append(path);
+    const dot = document.createElementNS(namespace, "circle");
+    dot.setAttribute("class", `sentiment-hover-dot ${lane.metric.id}`);
+    dot.setAttribute("r", lane.metric.id === "index" ? "6" : "4.5");
+    dot.hidden = true;
+    svg.append(dot);
+    dots.set(lane.metric.id, dot);
+  }
+
+  const hoverLine = document.createElementNS(namespace, "line");
+  hoverLine.setAttribute("class", "sentiment-hover-line");
+  hoverLine.setAttribute("y1", String(plot.top));
+  hoverLine.setAttribute("y2", "560");
+  hoverLine.hidden = true;
+  svg.append(hoverLine);
+  const capture = document.createElementNS(namespace, "rect");
+  capture.setAttribute("x", String(plot.left));
+  capture.setAttribute("y", String(plot.top));
+  capture.setAttribute("width", String(plotWidth));
+  capture.setAttribute("height", "534");
+  capture.setAttribute("fill", "transparent");
+  capture.setAttribute("class", "sentiment-capture");
+  svg.append(capture);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "sentiment-tooltip";
+  tooltip.hidden = true;
+  const showPoint = (index, clientX) => {
+    const point = chartPoints[index];
+    const x = xFor(point);
+    hoverLine.hidden = false;
+    hoverLine.setAttribute("x1", String(x));
+    hoverLine.setAttribute("x2", String(x));
+    for (const lane of lanes) {
+      const value = Number(point[lane.metric.key]);
+      const dot = dots.get(lane.metric.id);
+      dot.hidden = !Number.isFinite(value);
+      if (Number.isFinite(value)) {
+        dot.setAttribute("cx", String(x));
+        dot.setAttribute("cy", String(lane.yFor(value)));
+      }
+    }
+    const date = document.createElement("strong");
+    date.textContent = point.index_live ? `${point.date}｜加權指數最新報價` : point.date || "";
+    const rows = sentimentMetrics.map((metric) => {
+      const row = document.createElement("span");
+      row.className = metric.id;
+      row.textContent = `${metric.label}：${formatSentimentTooltipValue(metric, point)}`;
+      return row;
+    });
+    tooltip.replaceChildren(date, ...rows);
+    tooltip.hidden = false;
+    const bounds = svg.getBoundingClientRect();
+    const percentage = ((clientX - bounds.left) / bounds.width) * 100;
+    tooltip.style.left = `${Math.max(10, Math.min(90, percentage))}%`;
+  };
+  const hidePoint = () => {
+    tooltip.hidden = true;
+    hoverLine.hidden = true;
+    for (const dot of dots.values()) dot.hidden = true;
+  };
+  capture.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const chartX = ((event.clientX - bounds.left) / bounds.width) * width;
+    let closest = 0;
+    let distance = Number.POSITIVE_INFINITY;
+    chartPoints.forEach((point, index) => {
+      const candidate = Math.abs(xFor(point) - chartX);
+      if (candidate < distance) {
+        closest = index;
+        distance = candidate;
+      }
+    });
+    showPoint(closest, event.clientX);
+  });
+  capture.addEventListener("pointerleave", hidePoint);
+  wrap.append(svg, tooltip);
+  return wrap;
+}
+
 function renderTaiwanSentiment(payload) {
   const points = sentimentPoints(payload);
   elements.taiwanSentimentUpdated.textContent = points.length
-    ? `${payload.label || "日資料"}・最新 ${points.at(-1).date}`
+    ? `${payload.label || "年初至今"}｜籌碼最後 ${points.at(-1).date}`
     : "資料更新中";
-  elements.taiwanSentimentSource.textContent = payload && payload.source ? `${payload.source} 圖表尺度為各序列首日＝100；移動游標可看原始值。` : "";
+  elements.taiwanSentimentSource.textContent = payload && payload.source
+    ? `${payload.source}｜四個獨立刻度共用同一時間軸；籌碼資料為盤後統計，並非即時逐筆。`
+    : "";
   if (points.length === 0) {
     const empty = document.createElement("p");
     empty.className = "sentiment-empty";
@@ -675,8 +928,8 @@ function renderTaiwanSentiment(payload) {
     return;
   }
   const latest = points.at(-1);
-  elements.taiwanSentimentKpis.replaceChildren(...sentimentMetrics.map((metric) => makeSentimentKpi(metric, latest)));
-  elements.taiwanSentimentChart.replaceChildren(makeTaiwanSentimentChart(points));
+  elements.taiwanSentimentKpis.replaceChildren(...sentimentMetrics.map((metric) => makeSentimentKpi(metric, latest, payload.live_index)));
+  elements.taiwanSentimentChart.replaceChildren(makeTaiwanRelationshipChart(points, payload.live_index));
 }
 
 function renderMarketPulse(payload) {

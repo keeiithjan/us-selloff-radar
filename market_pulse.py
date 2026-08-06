@@ -43,7 +43,9 @@ TAIFEX_FOREIGN_FUTURES_URL = "https://www.taifex.com.tw/cht/3/futContractsDate"
 TWSE_MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
 TAIWAN_INDEX_TICKER = "^TWII"
 VIX_TICKER = "^VIX"
-TAIWAN_SENTIMENT_DAYS = 20
+# The positioning view is a year-to-date relationship chart.  Data is cached
+# between Actions runs, so the initial backfill is the only expensive refresh.
+TAIWAN_SENTIMENT_DAYS = 300
 TAIWAN_SENTIMENT_REFRESH_DAYS = 6
 # Binance uses BRKB for Berkshire B, while Yahoo/TradingView use BRK-B.
 BINANCE_STOCK_ALIASES = {"BRKB": "BRK-B"}
@@ -258,7 +260,7 @@ def daily_close_map(ticker: str) -> dict[str, float]:
     try:
         frame = yf.download(
             ticker,
-            period="6mo",
+            period="2y",
             interval="1d",
             auto_adjust=False,
             progress=False,
@@ -274,6 +276,53 @@ def daily_close_map(ticker: str) -> dict[str, float]:
         pd.Timestamp(timestamp).date().isoformat(): round(float(row["Close"]), 4)
         for timestamp, row in cleaned.iterrows()
         if pd.notna(row.get("Close"))
+    }
+
+
+def taiwan_index_live_quote(index_closes: dict[str, float]) -> dict[str, object] | None:
+    """Return the most recent available intraday TAIEX quote with its own timestamp.
+
+    The daily relationship series intentionally remains end-of-day data because
+    foreign futures OI and margin balances are official daily publications.  This
+    separate quote keeps the headline TAIEX card current during the Taiwan session
+    without pretending that those two positioning series update intraday.
+    """
+    try:
+        frame = yf.download(
+            TAIWAN_INDEX_TICKER,
+            period="2d",
+            interval="1m",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+            timeout=20,
+            multi_level_index=False,
+        )
+    except Exception as exc:
+        logging.warning("Live Taiwan index download failed: %s", exc)
+        return None
+    if frame.empty or "Close" not in frame.columns:
+        return None
+    closes = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+    if closes.empty:
+        return None
+    timestamp = pd.Timestamp(closes.index[-1])
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(TAIPEI)
+    else:
+        timestamp = timestamp.tz_convert(TAIPEI)
+    price = round(float(closes.iloc[-1]), 2)
+    quote_date = timestamp.date().isoformat()
+    prior_dates = [key for key in index_closes if key < quote_date]
+    previous_close = index_closes[max(prior_dates)] if prior_dates else None
+    change = round(price - float(previous_close), 2) if previous_close is not None else None
+    return {
+        "price": price,
+        "timestamp": timestamp.isoformat(),
+        "date": quote_date,
+        "previous_close": previous_close,
+        "change": change,
+        "change_pct": round((change / float(previous_close)) * 100, 3) if change is not None and previous_close else None,
     }
 
 
@@ -318,16 +367,36 @@ def recent_weekdays(now: datetime, count: int) -> list[calendar_date]:
     return days
 
 
+def year_to_date_weekdays(now: datetime) -> list[calendar_date]:
+    """Return each weekday from January 1 through the current Taiwan date."""
+    latest = now.astimezone(TAIPEI).date()
+    cursor = calendar_date(latest.year, 1, 1)
+    days: list[calendar_date] = []
+    while cursor <= latest:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor += timedelta(days=1)
+    return days
+
+
 def build_taiwan_sentiment(now: datetime) -> dict[str, object]:
-    """Build a daily Taiwan positioning history and persist it through Actions cache."""
-    target_days = _positive_int_env("TAIWAN_SENTIMENT_DAYS", TAIWAN_SENTIMENT_DAYS, 10, 45)
+    """Build a year-to-date Taiwan positioning history and cache it between runs."""
+    target_days = _positive_int_env("TAIWAN_SENTIMENT_DAYS", TAIWAN_SENTIMENT_DAYS, 10, 300)
     history = load_taiwan_sentiment_history()
-    requested_days = recent_weekdays(now, target_days + 10 if not history else TAIWAN_SENTIMENT_REFRESH_DAYS)
+    ytd_days = year_to_date_weekdays(now)[-target_days:]
+    refresh_days = recent_weekdays(now, TAIWAN_SENTIMENT_REFRESH_DAYS)
+    requested_days = list(
+        dict.fromkeys(
+            [day for day in ytd_days if day.isoformat() not in history]
+            + refresh_days
+        )
+    )
     index_closes = daily_close_map(TAIWAN_INDEX_TICKER)
     vix_closes = daily_close_map(VIX_TICKER)
+    live_index = taiwan_index_live_quote(index_closes)
 
     snapshots: list[dict[str, object]] = []
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(taiwan_sentiment_snapshot, day): day for day in requested_days}
         for future in as_completed(futures):
             day = futures[future]
@@ -349,8 +418,8 @@ def build_taiwan_sentiment(now: datetime) -> dict[str, object]:
         snapshot["vix_close"] = vix_close
         history[day] = snapshot
 
-    ordered = [history[key] for key in sorted(history)]
-    ordered = ordered[-target_days:]
+    ytd_keys = {day.isoformat() for day in ytd_days}
+    ordered = [history[key] for key in sorted(history) if key in ytd_keys]
     previous: dict[str, object] | None = None
     for point in ordered:
         for key, change_key in (
@@ -365,12 +434,13 @@ def build_taiwan_sentiment(now: datetime) -> dict[str, object]:
 
     save_taiwan_sentiment_history(ordered)
     return {
-        "label": f"最近 {len(ordered)} 個交易日",
-        "normalization": "首日=100",
+        "label": f"{now.astimezone(TAIPEI).year} 年迄今｜{len(ordered)} 個交易日",
+        "time_window": "year_to_date",
         "points": ordered,
+        "live_index": live_index,
         "source": (
-            "加權指數、VIX：Yahoo Finance via yfinance 日線收盤；"
-            "外資空單：臺灣期貨交易所臺股期貨外資未平倉空方口數；"
+            "加權指數：Yahoo Finance via yfinance（圖表為日線、卡片另顯示最新可得 1 分鐘報價）；"
+            "VIX：Yahoo Finance 日線；外資空單：臺灣期貨交易所臺股期貨外資未平倉空方口數；"
             "融資餘額：臺灣證券交易所上市信用交易統計的融資金額（仟元，換算億元）。"
         ),
     }
@@ -728,8 +798,9 @@ def main() -> None:
         logging.warning("Taiwan sentiment refresh failed: %s", exc)
         taiwan_sentiment = {
             "label": "資料更新中",
-            "normalization": "首日=100",
+            "time_window": "year_to_date",
             "points": [],
+            "live_index": None,
             "source": "台股籌碼資料暫時無法更新。",
         }
         errors.append("台股籌碼資料更新失敗")
