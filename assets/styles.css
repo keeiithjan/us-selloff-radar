@@ -161,6 +161,8 @@ body {
 .sparkline-area { fill: rgb(80 113 98 / 9%); }
 .sparkline-line { fill: none; stroke: #b8cfda; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; vector-effect: non-scaling-stroke; }
 .sparkline-last { fill: #b8cfda; stroke: var(--surface); stroke-width: 1.25; vector-effect: non-scaling-stroke; animation: last-price-pulse 1.45s ease-in-out infinite; }
+.sparkline-signal { fill: var(--electric); stroke: var(--surface); stroke-width: 1.35; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px var(--electric)); animation: signal-point-pulse 1.3s ease-in-out infinite; }
+@keyframes signal-point-pulse { 50% { opacity: .48; r: 4.4px; } }
 @keyframes last-price-pulse { 50% { opacity: .38; filter: drop-shadow(0 0 4px currentColor); } }
 .future-sparkline.up .sparkline-area { fill: rgb(35 115 92 / 13%); }
 .future-sparkline.up .sparkline-line { stroke: var(--accent); filter: drop-shadow(0 0 2px rgb(32 224 191 / 75%)); }
@@ -412,6 +414,9 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-size: 1.28rem; letter-spacing: -.0
 .sequential-signal h4 { margin: 0; font-size: .98rem; letter-spacing: -.015em; }
 .signal-price { color: var(--ink); font-size: .88rem; font-weight: 700; white-space: nowrap; }
 .signal-age { margin: 7px 0 0; color: var(--accent); font-size: .72rem; font-weight: 800; }
+.signal-details { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.signal-details span { padding: 3px 6px; border: 1px solid rgb(117 169 191 / 22%); border-radius: 4px; background: rgb(117 169 191 / 7%); }
+.signal-sparkline { height: 48px; margin: 10px 0 4px; }
 .signal-labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
 .signal-labels span { padding: 4px 7px; border: 1px solid rgb(32 224 191 / 23%); border-radius: 999px; background: var(--accent-soft); color: #7bffe5; font-size: .7rem; font-weight: 800; }
 .sequential-signal.sell .signal-labels span { border-color: rgb(255 95 119 / 24%); background: var(--danger-soft); color: #ffadb9; }

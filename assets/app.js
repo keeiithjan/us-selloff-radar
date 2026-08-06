@@ -165,7 +165,7 @@ function marketTradingViewUrl(symbol) {
   return `https://tw.tradingview.com/chart/?${query.toString()}`;
 }
 
-function makeTradingViewLink(item, interval, label = "繁中 TradingView") {
+function makeTradingViewLink(item, interval, label = "TradingView 圖") {
   const link = document.createElement("a");
   link.className = "tv-link";
   link.href = tradingViewUrl(item, interval);
@@ -173,6 +173,14 @@ function makeTradingViewLink(item, interval, label = "繁中 TradingView") {
   link.rel = "noopener noreferrer";
   link.textContent = label;
   return link;
+}
+
+function industryText(industry) {
+  return `產業：${industry || "未分類"}`;
+}
+
+function displayMarket(market) {
+  return market === "台股個股期貨標的" ? "台股" : (market || "市場");
 }
 
 function makeAlertCard(alert, motion = {}) {
@@ -187,7 +195,7 @@ function makeAlertCard(alert, motion = {}) {
   ticker.textContent = alert.symbol;
   const exchange = document.createElement("p");
   exchange.className = "exchange";
-  exchange.textContent = [alert.exchange, alert.industry, alert.bar_time_et].filter(Boolean).join(" · ");
+  exchange.textContent = [alert.exchange, industryText(alert.industry), alert.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, exchange);
   const drop = document.createElement("div");
   drop.className = "drop matrix-number";
@@ -236,7 +244,7 @@ function renderSelloff(payload) {
   motionState.hasAlerts = true;
 }
 
-function makeSparkline(values, direction, animate = false) {
+function makeSparkline(values, direction, animate = false, options = {}) {
   const points = (Array.isArray(values) ? values : [])
     .map(Number)
     .filter((value) => Number.isFinite(value));
@@ -257,7 +265,7 @@ function makeSparkline(values, direction, animate = false) {
   const namespace = "http://www.w3.org/2000/svg";
   const wrap = document.createElement("div");
   wrap.className = `future-sparkline ${direction}${animate ? " is-drawing" : ""}`;
-  wrap.title = "當日 1 分鐘走勢";
+  wrap.title = options.title || "當日 1 分鐘走勢";
   const svg = document.createElementNS(namespace, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("preserveAspectRatio", "none");
@@ -275,6 +283,16 @@ function makeSparkline(values, direction, animate = false) {
   last.setAttribute("cy", lastY);
   last.setAttribute("r", "2.4");
   svg.append(area, line, last);
+  const markerIndex = Number(options.markerIndex);
+  if (Number.isInteger(markerIndex) && markerIndex >= 0 && markerIndex < coordinates.length) {
+    const [markerX, markerY] = coordinates[markerIndex].split(",");
+    const marker = document.createElementNS(namespace, "circle");
+    marker.setAttribute("class", "sparkline-signal");
+    marker.setAttribute("cx", markerX);
+    marker.setAttribute("cy", markerY);
+    marker.setAttribute("r", "3.2");
+    svg.append(marker);
+  }
   wrap.append(svg);
   return wrap;
 }
@@ -342,7 +360,7 @@ function makeFutureCard(future, index = 0, motion = {}) {
     link.href = marketTradingViewUrl(future.tradingview_symbol);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "繁中圖表";
+    link.textContent = "TradingView 圖";
     card.append(link);
   }
   return card;
@@ -373,7 +391,7 @@ function makePremarketCard(mover, motion = {}) {
   ticker.textContent = mover.symbol;
   const industry = document.createElement("p");
   industry.className = "exchange";
-  industry.textContent = [mover.exchange, mover.industry, mover.bar_time_et].filter(Boolean).join(" · ");
+  industry.textContent = [mover.exchange, industryText(mover.industry), mover.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, industry);
   const change = document.createElement("strong");
   change.className = "premarket-change matrix-number";
@@ -403,7 +421,7 @@ function makePremarketCard(mover, motion = {}) {
   const sparkline = makeSparkline(mover.sparkline, direction, motion.enter);
   card.append(top, details);
   if (sparkline) card.append(sparkline);
-  card.append(makeTradingViewLink(mover, "5", "繁中圖表"));
+  card.append(makeTradingViewLink(mover, "5"));
   return card;
 }
 
@@ -459,7 +477,7 @@ function makeSequentialSignal(signal, interval) {
   ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
   const time = document.createElement("p");
   time.className = "exchange";
-  time.textContent = [signal.market || "市場", signal.exchange, signal.industry, signal.bar_time_et]
+  time.textContent = [displayMarket(signal.market), signal.exchange]
     .filter(Boolean)
     .join(" · ");
   const age = document.createElement("p");
@@ -472,6 +490,14 @@ function makeSequentialSignal(signal, interval) {
   price.textContent = formatCurrency(signal.last_price);
   top.append(heading, price);
 
+  const details = document.createElement("div");
+  details.className = "signal-details";
+  const industry = document.createElement("span");
+  industry.textContent = industryText(signal.industry);
+  const occurred = document.createElement("span");
+  occurred.textContent = `訊號產生：${signal.bar_time_et || "資料不足"}`;
+  details.append(industry, occurred);
+
   const labels = document.createElement("div");
   labels.className = "signal-labels";
   for (const label of Array.isArray(signal.labels) ? signal.labels : []) {
@@ -479,6 +505,18 @@ function makeSequentialSignal(signal, interval) {
     badge.textContent = label;
     labels.append(badge);
   }
+  const chartDirection = (() => {
+    const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
+      .map(Number)
+      .filter(Number.isFinite);
+    if (values.length < 2) return signal.side === "sell" ? "down" : "up";
+    return values.at(-1) > values[0] ? "up" : values.at(-1) < values[0] ? "down" : "flat";
+  })();
+  const sparkline = makeSparkline(signal.sparkline, chartDirection, true, {
+    title: "最近 30 根已完成 K 棒走勢；圓點為 TD 訊號",
+    markerIndex: signal.sparkline_signal_index,
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
   const momentum = signal.momentum || {};
   if (momentum.available) {
     const confirmation = document.createElement("p");
@@ -496,9 +534,13 @@ function makeSequentialSignal(signal, interval) {
     confirmation.textContent = momentum.bearish_confirmed
       ? `空方動能確認：符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`
       : `空方動能確認：未完整符合｜賣方 TD・前 ${priorBars} K 空方動能 ${priorCount} 次・${yellowText}`;
-    card.append(top, labels, confirmation, makeTradingViewLink(signal, interval, "繁中圖表"));
+    card.append(top, details, labels);
+    if (sparkline) card.append(sparkline);
+    card.append(confirmation, makeTradingViewLink(signal, interval));
   } else {
-    card.append(top, labels, makeTradingViewLink(signal, interval, "繁中圖表"));
+    card.append(top, details, labels);
+    if (sparkline) card.append(sparkline);
+    card.append(makeTradingViewLink(signal, interval));
   }
   return card;
 }
@@ -510,7 +552,7 @@ function filteredSignals(frame) {
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
   const signals = Array.isArray(frame.signals) ? frame.signals : [];
   return signals
-    .filter((signal) => selectedMarket === "all" || signal.market === selectedMarket)
+    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
     .filter((signal) => selectedSide === "all" || signal.side === selectedSide)
     .filter((signal) => selectedMomentum === "all" || Boolean(signal.momentum && signal.momentum.bearish_confirmed))
     .sort((left, right) => {

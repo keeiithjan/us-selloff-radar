@@ -38,6 +38,8 @@ TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
 TAIFEX_STOCK_FUTURES_URL = "https://www.taifex.com.tw/cht/5/stockMargining"
 BINANCE_DATA_URL = "https://data-api.binance.vision/api/v3"
+TWSE_COMPANY_INFO_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+TPEX_COMPANY_INFO_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 
 
 @dataclass(frozen=True)
@@ -152,19 +154,42 @@ class HtmlTables(HTMLParser):
             self._table = None
 
 
-def _http_json(path: str) -> object:
-    request = Request(
-        f"{BINANCE_DATA_URL}{path}", headers={"User-Agent": "us-selloff-radar/1.0"}
-    )
+def _http_json_url(url: str) -> object:
+    request = Request(url, headers={"User-Agent": "KJ-Radar-System/1.0"})
     with urlopen(request, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _http_json(path: str) -> object:
+    return _http_json_url(f"{BINANCE_DATA_URL}{path}")
+
+
+def fetch_taiwan_industries() -> dict[str, str]:
+    """Read public listed/OTC company industries for Taiwan signal cards."""
+    industries: dict[str, str] = {}
+    for source_url in (TWSE_COMPANY_INFO_URL, TPEX_COMPANY_INFO_URL):
+        try:
+            rows = _http_json_url(source_url)
+        except Exception as exc:
+            logging.warning("台股產業資料下載失敗：%s", exc)
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("公司代號") or row.get("證券代號") or "").strip().upper()
+            industry = str(row.get("產業別") or "").strip()
+            if re.fullmatch(r"\d{4,6}[A-Z]?", code) and industry:
+                industries[code] = industry
+    return industries
 
 
 def fetch_taifex_stock_futures() -> dict[str, str]:
     """Read the official, current stock-futures underlying list from TAIFEX.
 
     The first table is ordinary-share stock futures. ETF futures are a separate
-    table and intentionally excluded from this "個股期貨" monitor. Mini and
+    table and intentionally excluded from this Taiwan-stock monitor. Mini and
     standard contracts on the same underlying are deduplicated.
     """
     request = Request(TAIFEX_STOCK_FUTURES_URL, headers={"User-Agent": "Mozilla/5.0"})
@@ -231,17 +256,17 @@ def download_yahoo_records(
 
 
 def download_taiwan_records(
-    underlyings: dict[str, str], timeframe: Timeframe
+    underlyings: dict[str, str], industries: dict[str, str], timeframe: Timeframe
 ) -> list[tuple[Instrument, pd.DataFrame]]:
-    """Resolve .TW first, then .TWO for individual-futures underlyings."""
+    """Resolve Taiwan stock tickers on TWSE first, then TPEX."""
     primary = [
-        Instrument(f"{code}.TW", code, "TWSE", "台股個股期貨標的", TW_SESSION, name)
+        Instrument(f"{code}.TW", code, "TWSE", "台股", TW_SESSION, name, industries.get(code))
         for code, name in underlyings.items()
     ]
     primary_records = download_yahoo_records(primary, timeframe)
     found = {item.symbol for item, _ in primary_records}
     fallback = [
-        Instrument(f"{code}.TWO", code, "TPEX", "台股個股期貨標的", TW_SESSION, name)
+        Instrument(f"{code}.TWO", code, "TPEX", "台股", TW_SESSION, name, industries.get(code))
         for code, name in underlyings.items()
         if code not in found
     ]
@@ -642,15 +667,25 @@ def signal_side(labels: list[str]) -> str:
     return "mixed"
 
 
+def signal_sparkline(
+    frame: pd.DataFrame, position: int, maximum_bars: int = 30
+) -> tuple[list[float], int]:
+    """Return recent completed closes and the TD marker's location within them."""
+    start = max(0, len(frame) - maximum_bars)
+    closes = [round(float(value), 8) for value in frame["Close"].iloc[start:].tolist()]
+    return closes, max(0, min(position - start, len(closes) - 1))
+
+
 def collect_signals(
     us_instruments: list[Instrument],
     taiwan_underlyings: dict[str, str],
+    taiwan_industries: dict[str, str],
     binance_instruments: list[Instrument],
     timeframe: Timeframe,
     now: datetime,
 ) -> dict[str, object]:
     records = download_yahoo_records(us_instruments, timeframe)
-    records.extend(download_taiwan_records(taiwan_underlyings, timeframe))
+    records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
     scanned_by_market: dict[str, int] = {}
@@ -678,6 +713,7 @@ def collect_signals(
         for event in recent_events:
             position = int(event["position"])
             age_bars = len(frame) - 1 - position
+            sparkline, sparkline_signal_index = signal_sparkline(frame, position)
             signals.append(
                 {
                 "symbol": instrument.symbol,
@@ -696,6 +732,8 @@ def collect_signals(
                     "buy_countdown": event["buy_countdown"],
                     "sell_countdown": event["sell_countdown"],
                     "momentum": momentum_confirmation(features, position, str(event["side"])),
+                    "sparkline": sparkline,
+                    "sparkline_signal_index": sparkline_signal_index,
                 }
             )
 
@@ -714,7 +752,7 @@ def collect_signals(
 
 def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: list[str]) -> None:
     source = (
-        "美股與台股資料：Yahoo Finance via yfinance；台股個股期貨清單：台灣期交所公開資料；"
+        "美股與台股資料：Yahoo Finance via yfinance；台股監測清單：公開市場資料整理；"
         "幣安：24 小時成交額最高的 USDT 現貨交易對（預設前 40 檔）與公開 K 線。"
     )
     if errors:
@@ -743,6 +781,7 @@ def main() -> None:
         logging.warning("台灣期交所標的清單讀取失敗：%s", exc)
         taiwan_underlyings = {}
         errors.append("台灣期交所標的清單讀取失敗")
+    taiwan_industries = fetch_taiwan_industries()
     try:
         binance_instruments = fetch_binance_instruments()
     except Exception as exc:
@@ -751,7 +790,14 @@ def main() -> None:
         errors.append("幣安標的清單讀取失敗")
 
     frames = [
-        collect_signals(us_instruments, taiwan_underlyings, binance_instruments, timeframe, now)
+        collect_signals(
+            us_instruments,
+            taiwan_underlyings,
+            taiwan_industries,
+            binance_instruments,
+            timeframe,
+            now,
+        )
         for timeframe in TIMEFRAMES
     ]
     write_payload(frames, now, errors)
