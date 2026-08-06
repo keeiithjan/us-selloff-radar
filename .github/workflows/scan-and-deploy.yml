@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "2-57/5 * * * 1-5"
+    - cron: "3-53/10 * * * 1-5"
 
 env:
   RECENT_SIGNAL_BARS: "5"
@@ -19,12 +19,15 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
-  cancel-in-progress: true
+  # Do not use GitHub Pages' reserved deployment group, and never interrupt a
+  # scan that is already building the next site version.
+  group: kj-radar-scan-deploy
+  cancel-in-progress: false
 
 jobs:
   scan-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
     steps:
