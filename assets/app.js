@@ -14,6 +14,7 @@ const elements = {
   sequentialSort: document.querySelector("#sequential-sort"),
   sequentialSide: document.querySelector("#sequential-side"),
   sequentialMomentum: document.querySelector("#sequential-momentum"),
+  trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
   premarketSummary: document.querySelector("#premarket-summary"),
@@ -283,11 +284,15 @@ function makeSparkline(values, direction, animate = false, options = {}) {
   last.setAttribute("cy", lastY);
   last.setAttribute("r", "2.4");
   svg.append(area, line, last);
-  const markerIndex = Number(options.markerIndex);
-  if (Number.isInteger(markerIndex) && markerIndex >= 0 && markerIndex < coordinates.length) {
+  const markerSpecs = Array.isArray(options.markers)
+    ? options.markers
+    : [{ index: options.markerIndex, kind: "signal" }];
+  for (const markerSpec of markerSpecs) {
+    const markerIndex = Number(markerSpec && markerSpec.index);
+    if (!Number.isInteger(markerIndex) || markerIndex < 0 || markerIndex >= coordinates.length) continue;
     const [markerX, markerY] = coordinates[markerIndex].split(",");
     const marker = document.createElementNS(namespace, "circle");
-    marker.setAttribute("class", "sparkline-signal");
+    marker.setAttribute("class", `sparkline-${markerSpec && markerSpec.kind === "death" ? "death" : "signal"}`);
     marker.setAttribute("cx", markerX);
     marker.setAttribute("cy", markerY);
     marker.setAttribute("r", "3.2");
@@ -545,6 +550,102 @@ function makeSequentialSignal(signal, interval) {
   return card;
 }
 
+function filteredTrendReclaims(frame) {
+  const selectedMarket = elements.sequentialMarket.value;
+  const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
+  const signals = Array.isArray(frame.trend_reclaim_signals) ? frame.trend_reclaim_signals : [];
+  return signals
+    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.occurred_at_utc || 0);
+      const rightTime = Date.parse(right.occurred_at_utc || 0);
+      return multiplier * (leftTime - rightTime);
+    });
+}
+
+function makeTrendReclaimSignal(signal, interval) {
+  const card = document.createElement("article");
+  card.className = "trend-reclaim-signal";
+  const top = document.createElement("div");
+  top.className = "alert-top";
+
+  const heading = document.createElement("div");
+  const ticker = document.createElement("h4");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const market = document.createElement("p");
+  market.className = "exchange";
+  market.textContent = [displayMarket(signal.market), signal.exchange].filter(Boolean).join(" · ");
+  const status = document.createElement("p");
+  status.className = "reclaim-status";
+  status.textContent = Number(signal.age_bars) === 0 ? "最新回站白線" : `${signal.age_bars} 根 K 棒前回站白線`;
+  heading.append(ticker, market, status);
+
+  const price = document.createElement("strong");
+  price.className = "signal-price";
+  price.textContent = formatCurrency(signal.last_price);
+  top.append(heading, price);
+
+  const details = document.createElement("div");
+  details.className = "signal-details";
+  const industry = document.createElement("span");
+  industry.textContent = industryText(signal.industry);
+  const occurred = document.createElement("span");
+  occurred.textContent = `回站時間：${signal.bar_time_et || "資料不足"}`;
+  details.append(industry, occurred);
+
+  const rule = document.createElement("p");
+  rule.className = "reclaim-rule";
+  rule.textContent = `白／黃死亡交叉：${signal.death_cross_time || "資料不足"}｜${Number(signal.death_cross_bars_ago || 0)} 根 K 後收盤站回白線`;
+
+  const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
+    .map(Number)
+    .filter(Number.isFinite);
+  const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
+  const sparkline = makeSparkline(signal.sparkline, direction, true, {
+    title: "最近 30 根已完成 K 棒走勢；橘點為死亡交叉，藍點為站回白線",
+    markers: [
+      { index: signal.sparkline_death_index, kind: "death" },
+      { index: signal.sparkline_signal_index, kind: "signal" },
+    ],
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
+  card.append(top, details, rule);
+  if (sparkline) card.append(sparkline);
+  card.append(makeTradingViewLink(signal, interval));
+  return card;
+}
+
+function makeTrendReclaimTimeframe(frame) {
+  const panel = document.createElement("section");
+  panel.className = "trend-reclaim-timeframe";
+  const signals = filteredTrendReclaims(frame);
+  const header = document.createElement("div");
+  header.className = "timeframe-header";
+  const title = document.createElement("h4");
+  title.textContent = frame.label || frame.key;
+  const count = document.createElement("span");
+  count.textContent = `最近 ${Number(frame.recent_bars || 5)} 根：${signals.length} 個`;
+  header.append(title, count);
+  panel.append(header);
+  if (signals.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "timeframe-empty";
+    empty.textContent = "目前沒有符合死亡交叉後站回白線的訊號。";
+    panel.append(empty);
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "sequential-signals";
+  for (const signal of signals) list.append(makeTrendReclaimSignal(signal, frame.tradingview_interval));
+  panel.append(list);
+  return panel;
+}
+
+function renderTrendReclaims(frames) {
+  const eligibleFrames = frames.filter((frame) => ["15m", "1h"].includes(frame.key));
+  elements.trendReclaimFrames.replaceChildren(...eligibleFrames.map(makeTrendReclaimTimeframe));
+}
+
 function filteredSignals(frame) {
   const selectedMarket = elements.sequentialMarket.value;
   const selectedSide = elements.sequentialSide.value;
@@ -605,6 +706,7 @@ function renderSequential(payload) {
   sequentialPayload = payload;
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
+  renderTrendReclaims(frames);
   elements.sequentialUpdated.textContent = payload.updated_at_utc
     ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
     : "等待首次資料更新";

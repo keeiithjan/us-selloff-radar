@@ -76,6 +76,9 @@ TREND_RIBBON_FAST_LENGTH = 50
 TREND_RIBBON_SLOW_LENGTH = 100
 YELLOW_TREND_LOOKBACK_BARS = 30
 YELLOW_LOWER_EDGE_TOLERANCE_PCT = 0.001
+# A recovery signal is valid only when it occurs within 30 completed bars of a
+# white/yellow death cross that occurred below the Trend Trader ribbon.
+TREND_RECLAIM_DEATH_LOOKBACK_BARS = 30
 
 
 @dataclass(frozen=True)
@@ -526,6 +529,8 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     confirmation.
     """
     columns = [
+        "close",
+        "white_kernel",
         "yellow_mid",
         "trend_lower_edge",
         "trend_upper_edge",
@@ -576,6 +581,8 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(
         {
+            "close": close,
+            "white_kernel": kernel_close,
             "yellow_mid": yellow_mid,
             "trend_lower_edge": trend_lower_edge,
             "trend_upper_edge": trend_upper_edge,
@@ -584,6 +591,58 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
         },
         index=frame.index,
     )
+
+
+def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
+    """Find: below ribbon → white/yellow death cross → close reclaims white.
+
+    White is AI Momentum's ``kernClose`` and yellow is its ``zoneMid``.  The
+    death cross must occur while the candle closes below the lower EMA 50/100
+    ribbon edge.  A reclaim needs a completed close to cross above white while
+    white is still below yellow, preventing repeated or already-reversed setups.
+    """
+    if features is None or len(features) < 2:
+        return []
+
+    active_death_cross: int | None = None
+    events: list[dict[str, int]] = []
+    for position in range(1, len(features)):
+        row = features.iloc[position]
+        previous = features.iloc[position - 1]
+        values = (
+            row["close"],
+            row["white_kernel"],
+            row["yellow_mid"],
+            row["trend_lower_edge"],
+            previous["close"],
+            previous["white_kernel"],
+            previous["yellow_mid"],
+        )
+        if not all(np.isfinite(float(value)) for value in values):
+            continue
+
+        white = float(row["white_kernel"])
+        yellow = float(row["yellow_mid"])
+        prior_white = float(previous["white_kernel"])
+        prior_yellow = float(previous["yellow_mid"])
+        close = float(row["close"])
+        prior_close = float(previous["close"])
+        below_ribbon = close < float(row["trend_lower_edge"])
+        is_death_cross = prior_white >= prior_yellow and white < yellow
+        if is_death_cross and below_ribbon:
+            active_death_cross = position
+
+        if active_death_cross is None:
+            continue
+        if position - active_death_cross > TREND_RECLAIM_DEATH_LOOKBACK_BARS:
+            active_death_cross = None
+            continue
+
+        reclaims_white = prior_close <= prior_white and close > white
+        if reclaims_white and white < yellow and position > active_death_cross:
+            events.append({"position": position, "death_cross_position": active_death_cross})
+            active_death_cross = None
+    return events
 
 
 def momentum_confirmation(
@@ -688,6 +747,7 @@ def collect_signals(
     records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
+    trend_reclaim_signals: list[dict[str, object]] = []
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
@@ -705,11 +765,7 @@ def collect_signals(
             event for event in events
             if len(frame) - 1 - int(event["position"]) < recent_bars
         ]
-        features = (
-            ai_momentum_features(frame)
-            if recent_events and timeframe.key in MOMENTUM_TIMEFRAME_KEYS
-            else None
-        )
+        features = ai_momentum_features(frame) if timeframe.key in MOMENTUM_TIMEFRAME_KEYS else None
         for event in recent_events:
             position = int(event["position"])
             age_bars = len(frame) - 1 - position
@@ -737,7 +793,44 @@ def collect_signals(
                 }
             )
 
+        if timeframe.key in MOMENTUM_TIMEFRAME_KEYS:
+            recent_reclaims = [
+                event
+                for event in trend_reclaim_events(features)
+                if len(frame) - 1 - int(event["position"]) < recent_bars
+            ]
+            for event in recent_reclaims:
+                position = int(event["position"])
+                death_position = int(event["death_cross_position"])
+                sparkline, sparkline_signal_index = signal_sparkline(frame, position)
+                sparkline_start = max(0, len(frame) - 30)
+                trend_reclaim_signals.append(
+                    {
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "exchange": instrument.exchange,
+                        "market": instrument.market,
+                        "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
+                        "age_bars": len(frame) - 1 - position,
+                        "last_price": round(float(frame["Close"].iloc[position]), 8),
+                        "death_cross_time": format_bar_time(
+                            frame.index[death_position], timeframe, instrument.session
+                        ),
+                        "death_cross_bars_ago": position - death_position,
+                        "sparkline": sparkline,
+                        "sparkline_signal_index": sparkline_signal_index,
+                        "sparkline_death_index": (
+                            death_position - sparkline_start
+                            if death_position >= sparkline_start
+                            else None
+                        ),
+                    }
+                )
+
     signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
+    trend_reclaim_signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -747,6 +840,7 @@ def collect_signals(
         "recent_bars": int(os.getenv("RECENT_SIGNAL_BARS", "5")),
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
+        "trend_reclaim_signals": trend_reclaim_signals,
     }
 
 
