@@ -566,7 +566,8 @@ function makeSequentialSignal(signal, interval) {
 function filteredTrendReclaims(frame) {
   const selectedMarket = elements.sequentialMarket.value;
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
-  const signals = Array.isArray(frame.trend_reclaim_signals) ? frame.trend_reclaim_signals : [];
+  const signals = (Array.isArray(frame.trend_reclaim_signals) ? frame.trend_reclaim_signals : [])
+    .filter((signal) => signal.side === "buy" && signal.signal_type === "long_reclaim");
   return signals
     .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
     .sort((left, right) => {
@@ -587,7 +588,7 @@ function makeTrendReclaimSignal(signal, interval) {
   ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
   const status = document.createElement("p");
   status.className = "reclaim-status";
-  status.textContent = Number(signal.age_bars) === 0 ? "最新回站白線" : `${signal.age_bars} 根 K 棒前回站白線`;
+  status.textContent = Number(signal.age_bars) === 0 ? "做多｜最新回站白線" : `做多｜${signal.age_bars} 根 K 棒前回站白線`;
   heading.append(ticker, status);
 
   const price = document.createElement("strong");
@@ -610,7 +611,7 @@ function makeTrendReclaimSignal(signal, interval) {
 
   const rule = document.createElement("p");
   rule.className = "reclaim-rule";
-  rule.textContent = `白／黃死亡交叉：${signal.death_cross_time || "資料不足"}｜${Number(signal.death_cross_bars_ago || 0)} 根 K 後收盤站回白線`;
+  rule.textContent = `趨勢帶下方白／黃死亡交叉：${signal.death_cross_time || "資料不足"}｜${Number(signal.death_cross_bars_ago || 0)} 根 K 後收盤站回白線`;
 
   const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
     .map(Number)

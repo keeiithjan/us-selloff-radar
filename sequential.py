@@ -612,12 +612,13 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
-    """Find: below ribbon → white/yellow death cross → close reclaims white.
+    """Find a long-only reclaim after a death cross below the ribbon.
 
     White is AI Momentum's ``kernClose`` and yellow is its ``zoneMid``.  The
-    death cross must occur while the candle closes below the lower EMA 50/100
-    ribbon edge.  A reclaim needs a completed close to cross above white while
-    white is still below yellow, preventing repeated or already-reversed setups.
+    death-cross candle, white line, and yellow line must *all* be below the
+    lower EMA 50/100 ribbon edge.  A long reclaim needs a completed close to
+    cross above white while white remains below yellow.  This function never
+    emits a short signal.
     """
     if features is None or len(features) < 2:
         return []
@@ -645,9 +646,10 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
         prior_yellow = float(previous["yellow_mid"])
         close = float(row["close"])
         prior_close = float(previous["close"])
-        below_ribbon = close < float(row["trend_lower_edge"])
+        lower_edge = float(row["trend_lower_edge"])
+        cross_below_ribbon = max(close, white, yellow) < lower_edge
         is_death_cross = prior_white >= prior_yellow and white < yellow
-        if is_death_cross and below_ribbon:
+        if is_death_cross and cross_below_ribbon:
             active_death_cross = position
 
         if active_death_cross is None:
@@ -858,6 +860,8 @@ def collect_signals(
                         "industry": instrument.industry,
                         "exchange": instrument.exchange,
                         "market": instrument.market,
+                        "side": "buy",
+                        "signal_type": "long_reclaim",
                         "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
                         "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
                         "age_bars": len(frame) - 1 - position,
