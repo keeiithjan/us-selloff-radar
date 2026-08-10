@@ -726,189 +726,159 @@ function sentimentLinePath(points, metric, xFor, yFor) {
   return path.trim();
 }
 
-function makeTaiwanRelationshipChart(points, liveIndex) {
-  if (points.length < 2) return makeTaiwanSentimentChart(points);
-
-  const chartPoints = sentimentChartPoints(points, liveIndex);
+function makeTaiwanRelationshipPanel(points, metric) {
   const namespace = "http://www.w3.org/2000/svg";
-  const width = 1200;
-  const height = 650;
-  const plot = { left: 106, right: 100, top: 26, bottom: 50 };
+  const width = 620;
+  const height = 262;
+  const plot = { left: 72, right: 18, top: 24, bottom: 38 };
   const plotWidth = width - plot.left - plot.right;
-  const start = Date.parse(`${chartPoints[0].date}T00:00:00Z`);
-  const end = Date.parse(`${chartPoints.at(-1).date}T00:00:00Z`);
-  const duration = Math.max(end - start, 86_400_000);
-  const xFor = (point) => plot.left + ((Date.parse(`${point.date}T00:00:00Z`) - start) / duration) * plotWidth;
-  const laneSpecs = [
-    { top: 26, height: 202 },
-    { top: 250, height: 88 },
-    { top: 358, height: 88 },
-    { top: 466, height: 88 },
-  ];
-  const lanes = sentimentMetrics.map((metric, index) => {
-    const spec = laneSpecs[index];
-    const scale = scaleSentimentLane(chartPoints, metric);
-    return {
-      metric,
-      ...spec,
-      scale,
-      yFor: (value) => spec.top + ((scale.max - value) / (scale.max - scale.min)) * spec.height,
-    };
-  });
+  const plotHeight = height - plot.top - plot.bottom;
+  const scale = scaleSentimentLane(points, metric);
+  const xFor = (index) => plot.left + (index / (points.length - 1)) * plotWidth;
+  const yFor = (value) => plot.top + ((scale.max - value) / (scale.max - scale.min)) * plotHeight;
+  const latest = [...points].reverse().find((point) => Number.isFinite(Number(point[metric.key])));
 
-  const wrap = document.createElement("div");
-  wrap.className = "sentiment-chart-canvas relationship-chart";
+  const panel = document.createElement("article");
+  panel.className = `sentiment-panel ${metric.id}`;
+  const heading = document.createElement("div");
+  heading.className = "sentiment-panel-heading";
+  const title = document.createElement("h3");
+  title.textContent = metric.label;
+  const value = document.createElement("strong");
+  value.className = "matrix-number";
+  value.textContent = latest ? metric.format(latest[metric.key]) : "—";
+  heading.append(title, value);
+
+  const canvas = document.createElement("div");
+  canvas.className = "sentiment-chart-canvas relationship-panel";
   const svg = document.createElementNS(namespace, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "加權指數主圖，並以同一時間軸排列外資台指期空單、上市融資餘額和 VIX；游標可查看每個日期的原始值。 ");
+  svg.setAttribute("aria-label", `${metric.label}獨立刻度走勢圖；游標可查看每日原始數值。`);
 
-  for (const lane of lanes) {
-    const panel = document.createElementNS(namespace, "rect");
-    panel.setAttribute("class", `sentiment-lane ${lane.metric.id}`);
-    panel.setAttribute("x", String(plot.left));
-    panel.setAttribute("y", String(lane.top));
-    panel.setAttribute("width", String(plotWidth));
-    panel.setAttribute("height", String(lane.height));
-    svg.append(panel);
-    for (let tick = 0; tick <= 2; tick += 1) {
-      const value = lane.scale.min + ((lane.scale.max - lane.scale.min) * tick) / 2;
-      const y = lane.yFor(value);
-      const grid = document.createElementNS(namespace, "line");
-      grid.setAttribute("class", "sentiment-grid");
-      grid.setAttribute("x1", String(plot.left));
-      grid.setAttribute("x2", String(width - plot.right));
-      grid.setAttribute("y1", String(y));
-      grid.setAttribute("y2", String(y));
-      svg.append(grid);
-      const axis = document.createElementNS(namespace, "text");
-      axis.setAttribute("class", "sentiment-axis-label");
-      axis.setAttribute("x", String(plot.left - 12));
-      axis.setAttribute("y", String(y + 4));
-      axis.setAttribute("text-anchor", "end");
-      axis.textContent = lane.metric.format(value);
-      svg.append(axis);
-    }
-    const label = document.createElementNS(namespace, "text");
-    label.setAttribute("class", `sentiment-lane-label ${lane.metric.id}`);
-    label.setAttribute("x", String(plot.left + 13));
-    label.setAttribute("y", String(lane.top + 21));
-    label.textContent = lane.metric.label;
-    svg.append(label);
-    const latest = [...chartPoints].reverse().find((point) => Number.isFinite(Number(point[lane.metric.key])));
-    if (latest) {
-      const current = document.createElementNS(namespace, "text");
-      current.setAttribute("class", `sentiment-lane-value ${lane.metric.id}`);
-      current.setAttribute("x", String(width - plot.right + 12));
-      current.setAttribute("y", String(lane.yFor(Number(latest[lane.metric.key])) + 4));
-      current.textContent = lane.metric.format(latest[lane.metric.key]);
-      svg.append(current);
-    }
+  const background = document.createElementNS(namespace, "rect");
+  background.setAttribute("class", `sentiment-lane ${metric.id}`);
+  background.setAttribute("x", String(plot.left));
+  background.setAttribute("y", String(plot.top));
+  background.setAttribute("width", String(plotWidth));
+  background.setAttribute("height", String(plotHeight));
+  svg.append(background);
+
+  for (let tick = 0; tick <= 3; tick += 1) {
+    const tickValue = scale.min + ((scale.max - scale.min) * tick) / 3;
+    const y = yFor(tickValue);
+    const grid = document.createElementNS(namespace, "line");
+    grid.setAttribute("class", "sentiment-grid");
+    grid.setAttribute("x1", String(plot.left));
+    grid.setAttribute("x2", String(width - plot.right));
+    grid.setAttribute("y1", String(y));
+    grid.setAttribute("y2", String(y));
+    svg.append(grid);
+    const axis = document.createElementNS(namespace, "text");
+    axis.setAttribute("class", "sentiment-axis-label");
+    axis.setAttribute("x", String(plot.left - 9));
+    axis.setAttribute("y", String(y + 4));
+    axis.setAttribute("text-anchor", "end");
+    axis.textContent = metric.format(tickValue);
+    svg.append(axis);
   }
 
-  const months = new Set();
-  const xLabelIndexes = chartPoints.reduce((indexes, point, index) => {
-    const month = Number(String(point.date).slice(5, 7));
-    if ([1, 4, 7, 10].includes(month) && !months.has(month)) {
-      months.add(month);
-      indexes.push(index);
-    }
-    return indexes;
-  }, [0]);
-  if (xLabelIndexes.at(-1) !== chartPoints.length - 1) xLabelIndexes.push(chartPoints.length - 1);
-  for (const index of [...new Set(xLabelIndexes)]) {
+  const xLabels = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])];
+  for (const index of xLabels) {
     const label = document.createElementNS(namespace, "text");
     label.setAttribute("class", "sentiment-axis-label sentiment-date-label");
-    label.setAttribute("x", String(xFor(chartPoints[index])));
-    label.setAttribute("y", String(height - 16));
-    label.textContent = String(chartPoints[index].date || "").slice(0, 7).replace("-", "/");
+    label.setAttribute("x", String(xFor(index)));
+    label.setAttribute("y", String(height - 12));
+    label.textContent = String(points[index].date || "").slice(5).replace("-", "/");
     svg.append(label);
   }
 
-  const dots = new Map();
-  for (const lane of lanes) {
-    const path = document.createElementNS(namespace, "path");
-    path.setAttribute("class", `sentiment-line ${lane.metric.id}`);
-    path.setAttribute("d", sentimentLinePath(chartPoints, lane.metric, xFor, lane.yFor));
-    svg.append(path);
-    const dot = document.createElementNS(namespace, "circle");
-    dot.setAttribute("class", `sentiment-hover-dot ${lane.metric.id}`);
-    dot.setAttribute("r", lane.metric.id === "index" ? "6" : "4.5");
-    dot.hidden = true;
-    svg.append(dot);
-    dots.set(lane.metric.id, dot);
-  }
+  const path = document.createElementNS(namespace, "path");
+  path.setAttribute("class", `sentiment-line ${metric.id}`);
+  let connected = false;
+  const pathData = points.map((point, index) => {
+    const pointValue = Number(point[metric.key]);
+    if (!Number.isFinite(pointValue)) {
+      connected = false;
+      return "";
+    }
+    const command = connected ? "L" : "M";
+    connected = true;
+    return `${command}${xFor(index)} ${yFor(pointValue)}`;
+  }).join(" ");
+  path.setAttribute("d", pathData);
+  svg.append(path);
 
   const hoverLine = document.createElementNS(namespace, "line");
   hoverLine.setAttribute("class", "sentiment-hover-line");
   hoverLine.setAttribute("y1", String(plot.top));
-  hoverLine.setAttribute("y2", "560");
+  hoverLine.setAttribute("y2", String(height - plot.bottom));
   hoverLine.hidden = true;
   svg.append(hoverLine);
+  const dot = document.createElementNS(namespace, "circle");
+  dot.setAttribute("class", `sentiment-hover-dot ${metric.id}`);
+  dot.setAttribute("r", metric.id === "index" ? "5.5" : "4.5");
+  dot.hidden = true;
+  svg.append(dot);
+
   const capture = document.createElementNS(namespace, "rect");
   capture.setAttribute("x", String(plot.left));
   capture.setAttribute("y", String(plot.top));
   capture.setAttribute("width", String(plotWidth));
-  capture.setAttribute("height", "534");
+  capture.setAttribute("height", String(plotHeight));
   capture.setAttribute("fill", "transparent");
   capture.setAttribute("class", "sentiment-capture");
   svg.append(capture);
 
   const tooltip = document.createElement("div");
-  tooltip.className = "sentiment-tooltip";
+  tooltip.className = "sentiment-tooltip single-metric";
   tooltip.hidden = true;
   const showPoint = (index, clientX) => {
-    const point = chartPoints[index];
-    const x = xFor(point);
+    const point = points[index];
+    const pointValue = Number(point[metric.key]);
+    if (!Number.isFinite(pointValue)) return;
+    const x = xFor(index);
     hoverLine.hidden = false;
     hoverLine.setAttribute("x1", String(x));
     hoverLine.setAttribute("x2", String(x));
-    for (const lane of lanes) {
-      const value = Number(point[lane.metric.key]);
-      const dot = dots.get(lane.metric.id);
-      dot.hidden = !Number.isFinite(value);
-      if (Number.isFinite(value)) {
-        dot.setAttribute("cx", String(x));
-        dot.setAttribute("cy", String(lane.yFor(value)));
-      }
-    }
+    dot.hidden = false;
+    dot.setAttribute("cx", String(x));
+    dot.setAttribute("cy", String(yFor(pointValue)));
     const date = document.createElement("strong");
-    date.textContent = point.index_live ? `${point.date}｜加權指數最新報價` : point.date || "";
-    const rows = sentimentMetrics.map((metric) => {
-      const row = document.createElement("span");
-      row.className = metric.id;
-      row.textContent = `${metric.label}：${formatSentimentTooltipValue(metric, point)}`;
-      return row;
-    });
-    tooltip.replaceChildren(date, ...rows);
+    date.textContent = point.index_live && metric.id === "index" ? `${point.date}｜最新報價` : point.date || "";
+    const detail = document.createElement("span");
+    detail.className = metric.id;
+    detail.textContent = formatSentimentTooltipValue(metric, point);
+    tooltip.replaceChildren(date, detail);
     tooltip.hidden = false;
     const bounds = svg.getBoundingClientRect();
     const percentage = ((clientX - bounds.left) / bounds.width) * 100;
-    tooltip.style.left = `${Math.max(10, Math.min(90, percentage))}%`;
+    tooltip.style.left = `${Math.max(15, Math.min(85, percentage))}%`;
   };
   const hidePoint = () => {
     tooltip.hidden = true;
     hoverLine.hidden = true;
-    for (const dot of dots.values()) dot.hidden = true;
+    dot.hidden = true;
   };
   capture.addEventListener("pointermove", (event) => {
     const bounds = svg.getBoundingClientRect();
-    const chartX = ((event.clientX - bounds.left) / bounds.width) * width;
-    let closest = 0;
-    let distance = Number.POSITIVE_INFINITY;
-    chartPoints.forEach((point, index) => {
-      const candidate = Math.abs(xFor(point) - chartX);
-      if (candidate < distance) {
-        closest = index;
-        distance = candidate;
-      }
-    });
-    showPoint(closest, event.clientX);
+    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left - (plot.left / width) * bounds.width) / ((plotWidth / width) * bounds.width)));
+    showPoint(Math.round(relative * (points.length - 1)), event.clientX);
   });
   capture.addEventListener("pointerleave", hidePoint);
-  wrap.append(svg, tooltip);
-  return wrap;
+  canvas.append(svg, tooltip);
+  panel.append(heading, canvas);
+  return panel;
+}
+
+function makeTaiwanRelationshipChart(points, liveIndex) {
+  if (points.length < 2) return makeTaiwanSentimentChart(points);
+  const chartPoints = sentimentChartPoints(points, liveIndex);
+  const grid = document.createElement("div");
+  grid.className = "sentiment-chart-grid";
+  grid.append(...sentimentMetrics.map((metric) => makeTaiwanRelationshipPanel(chartPoints, metric)));
+  return grid;
 }
 
 function renderTaiwanSentiment(payload) {
