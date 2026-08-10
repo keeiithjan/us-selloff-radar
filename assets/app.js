@@ -1019,7 +1019,14 @@ function makeChipCandidate(candidate) {
     makeChipFact("外資近 5 日", `${foreignDirection}${formatShares(candidate.foreign_5_shares)}`),
     makeChipFact("投信近 5 日", `${trustDirection}${formatShares(candidate.trust_5_shares)}`),
     makeChipFact("大戶持股 12–15", Number.isFinite(Number(candidate.large_holder_pct)) ? `${Number(candidate.large_holder_pct).toFixed(2)}%` : "等待資料"),
-    makeChipFact("大戶週增減", Number.isFinite(Number(candidate.large_holder_weekly_change_pct)) ? formatPercent(candidate.large_holder_weekly_change_pct, 3) : "等待下週快照")
+    makeChipFact(
+      "大戶週增減",
+      candidate.large_holder_weekly_change_pct !== null
+        && candidate.large_holder_weekly_change_pct !== undefined
+        && Number.isFinite(Number(candidate.large_holder_weekly_change_pct))
+        ? formatPercent(candidate.large_holder_weekly_change_pct, 3)
+        : "等待下週快照"
+    )
   );
 
   const values = (Array.isArray(candidate.sparkline) ? candidate.sparkline : []).map(Number).filter(Number.isFinite);
@@ -1091,8 +1098,21 @@ function renderChipRadar(payload) {
     : "等待籌碼資料";
   elements.chipRadarSummary.replaceChildren(
     makeChipKpi("符合目前觀察門檻", `${Number(payload.qualified_candidates || 0)} 檔`, `${payload.universe_label || "台股觀察名單"} · 已取得價格 ${Number(payload.priced_symbols || 0)} 檔`, "positive"),
-    makeChipKpi("TDCC 大戶資料", holder.as_of || "等待資料", holder.available ? "持股分級 12–15 已讀取；週增減需下週快照" : "官方週資料暫時不可用"),
-    makeChipKpi("基準回測 5 日平均", backtestValue, backtest.ready ? `勝率 ${Number(backtest.win_rate_pct || 0).toFixed(1)}% · 訊號 ${Number(backtest.signals || 0)} 筆` : "尚未有足夠完整樣本", backtestTone)
+    makeChipKpi(
+      "TDCC 大戶資料",
+      holder.as_of || "等待資料",
+      holder.available
+        ? (holder.weekly_change_ready ? `已累積 ${Number(holder.snapshots_collected || 0)} 週快照，可計算週增減` : "已累積 1 週快照；下週公布後開始計算增減")
+        : "官方週資料暫時不可用"
+    ),
+    makeChipKpi(
+      "基準回測 5 日平均",
+      backtestValue,
+      backtest.ready
+        ? `勝率 ${Number(backtest.win_rate_pct || 0).toFixed(1)}% · 訊號 ${Number(backtest.signals || 0)} 筆 · 樣本進度 ${Number(backtest.coverage_pct || 0).toFixed(1)}%`
+        : `樣本累積中 · 目標 ${Number(backtest.coverage_target_sessions || 0)} 個交易日`,
+      backtestTone
+    )
   );
   elements.chipRadarBacktest.replaceChildren(renderChipBacktest(backtest));
   elements.chipRadarSource.textContent = payload.source || "";

@@ -55,9 +55,10 @@ TPEX_COMPANY_INFO_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 # This is a bounded, liquid Taiwan equity universe.  It comes from the current
 # official TAIFEX underlying list but the site intentionally calls it a
 # liquidity watchlist, not a stock-futures list.
-DEFAULT_HISTORY_DAYS = 45
+DEFAULT_HISTORY_DAYS = 520
 HISTORY_BUFFER_DAYS = 18
 DEFAULT_TOP_CANDIDATES = 30
+DEFAULT_BACKFILL_DAYS_PER_RUN = 5
 
 
 def _positive_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -185,6 +186,31 @@ def recent_weekdays(now: datetime, count: int) -> list[calendar_date]:
     return result
 
 
+def latest_contiguous_history(
+    flows_by_date: dict[str, dict[str, dict[str, int]]],
+    max_calendar_gap_days: int = 14,
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Return the most recent uninterrupted report segment.
+
+    The gradual backfill must never make a 2024 report and a 2026 report look
+    like adjacent trading days.  Fourteen calendar days accommodates normal
+    weekends and long Taiwan market holidays, while rejecting true gaps.
+    """
+    ordered = sorted(flows_by_date)
+    if not ordered:
+        return {}
+    retained = [ordered[-1]]
+    later = calendar_date.fromisoformat(ordered[-1])
+    for day in reversed(ordered[:-1]):
+        earlier = calendar_date.fromisoformat(day)
+        if (later - earlier).days > max_calendar_gap_days:
+            break
+        retained.append(day)
+        later = earlier
+    retained.reverse()
+    return {day: flows_by_date[day] for day in retained}
+
+
 def fetch_twse_institutional(day: calendar_date, universe: set[str]) -> dict[str, dict[str, int]] | None:
     query = urlencode({"date": day.strftime("%Y%m%d"), "selectType": "ALL", "response": "json"})
     payload = _http_json(f"{TWSE_T86_URL}?{query}")
@@ -295,9 +321,26 @@ def fetch_industries() -> dict[str, str]:
     return industries
 
 
-def refresh_institutional_history(history: dict[str, Any], now: datetime, universe: set[str], target_days: int) -> None:
+def refresh_institutional_history(
+    history: dict[str, Any],
+    now: datetime,
+    universe: set[str],
+    target_days: int,
+    backfill_days_per_run: int,
+) -> None:
     known = history["institutional_by_date"]
     requested = [day for day in recent_weekdays(now, target_days) if _iso_day(day) not in known]
+    # Extend backward from the latest contiguous reports.  Filling old gaps
+    # first would create disconnected periods and could corrupt the event
+    # study by making far-apart dates look adjacent.
+    requested = requested[:backfill_days_per_run]
+    if requested:
+        logging.info(
+            "Institutional history backfill: %s dates (%s saved / %s target)",
+            len(requested),
+            len(known),
+            target_days,
+        )
     # The official report has a sizeable payload.  Four concurrent requests
     # finish the initial backfill quickly while staying conservative to TWSE.
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -326,7 +369,7 @@ def _download_taiwan_frames(codes: Iterable[str]) -> tuple[dict[str, pd.DataFram
             try:
                 response = yf.download(
                     tickers=tickers_in_batch,
-                    period="9mo",
+                    period="3y",
                     interval="1d",
                     group_by="ticker",
                     auto_adjust=False,
@@ -568,8 +611,14 @@ def backtest_flow_model(
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     now = datetime.now(UTC)
-    history_days = _positive_int_env("CHIP_RADAR_HISTORY_DAYS", DEFAULT_HISTORY_DAYS, 25, 90)
+    history_days = _positive_int_env("CHIP_RADAR_HISTORY_DAYS", DEFAULT_HISTORY_DAYS, 25, 780)
     top_candidates = _positive_int_env("CHIP_RADAR_TOP_CANDIDATES", DEFAULT_TOP_CANDIDATES, 10, 60)
+    backfill_days_per_run = _positive_int_env(
+        "CHIP_RADAR_BACKFILL_DAYS_PER_RUN",
+        DEFAULT_BACKFILL_DAYS_PER_RUN,
+        1,
+        15,
+    )
     history = load_history()
 
     try:
@@ -578,7 +627,7 @@ def main() -> None:
         raise RuntimeError(f"台股流動性名單來源無法取得：{exc}") from exc
     universe = set(universe_map)
     industries = fetch_industries()
-    refresh_institutional_history(history, now, universe, history_days)
+    refresh_institutional_history(history, now, universe, history_days, backfill_days_per_run)
 
     tdcc_day: str | None = None
     holder_values: dict[str, float] = {}
@@ -588,9 +637,14 @@ def main() -> None:
             history["holder_snapshots"][tdcc_day] = holder_values
     except Exception as exc:
         logging.warning("TDCC large-holder source unavailable: %s", exc)
+        cached_holder_days = sorted(history.get("holder_snapshots", {}))
+        if cached_holder_days:
+            tdcc_day = cached_holder_days[-1]
+            holder_values = dict(history["holder_snapshots"][tdcc_day])
+            logging.info("Using cached TDCC snapshot from %s", tdcc_day)
 
     tpex_day, tpex_latest = fetch_tpex_latest(universe)
-    latest_by_date = history["institutional_by_date"]
+    latest_by_date = latest_contiguous_history(history["institutional_by_date"])
     sorted_days = sorted(latest_by_date)
     latest_day = sorted_days[-1] if sorted_days else None
     latest_twse = latest_by_date.get(latest_day, {}) if latest_day else {}
@@ -630,6 +684,9 @@ def main() -> None:
         for day, values in latest_by_date.items()
     }
     backtest = backtest_flow_model(backtest_flows, prices_by_code)
+    backtest["coverage_target_sessions"] = history_days
+    backtest["coverage_pct"] = round(min(100, len(sorted_days) / history_days * 100), 1)
+    backtest["backfill_days_per_run"] = backfill_days_per_run
     save_history(history, history_days)
 
     output = {
@@ -645,6 +702,8 @@ def main() -> None:
         "holder_snapshot": {
             "as_of": tdcc_day,
             "available": bool(tdcc_day and holder_values),
+            "snapshots_collected": len(history.get("holder_snapshots", {})),
+            "weekly_change_ready": len(history.get("holder_snapshots", {})) >= 2,
             "definition": "TDCC 持股分級 12–15 的集保庫存比例合計；第二週起才計算週增減。",
         },
         "source": "法人：TWSE 三大法人買賣超日報、TPEx 三大法人買賣明細；大戶：TDCC 集保戶股權分散表；價格與成交量：Yahoo Finance via yfinance。",

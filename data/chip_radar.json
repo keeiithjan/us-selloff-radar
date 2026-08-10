@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at_utc": "2026-08-10T06:27:17.017597+00:00",
+  "updated_at_utc": "2026-08-10T07:37:56.268346+00:00",
   "data_as_of": "2026-08-07",
   "universe_label": "台股流動性觀察名單",
   "universe_count": 249,
@@ -1871,21 +1871,26 @@
   "backtest": {
     "ready": true,
     "model_scope": "上市股票的外資／投信流動模型；訊號日收盤後，以下一交易日開盤進場、第五個交易日收盤出場；不含大戶週增減。",
-    "period_start": "2026-06-11",
+    "period_start": "2026-06-09",
     "period_end": "2026-08-07",
-    "available_sessions": 40,
-    "sample_days": 24,
-    "signals": 280,
-    "win_rate_pct": 38.2,
+    "available_sessions": 42,
+    "sample_days": 26,
+    "signals": 304,
+    "win_rate_pct": 38.5,
     "average_return_5d_pct": -1.4,
-    "median_return_5d_pct": -1.38,
+    "median_return_5d_pct": -1.31,
     "average_win_pct": 5.19,
-    "average_loss_pct": -5.47,
-    "caveat": "樣本採目前流動性觀察名單，存在存活者偏誤；此為研究事件分析，不是績效保證或投資建議。"
+    "average_loss_pct": -5.52,
+    "caveat": "樣本採目前流動性觀察名單，存在存活者偏誤；此為研究事件分析，不是績效保證或投資建議。",
+    "coverage_target_sessions": 520,
+    "coverage_pct": 8.1,
+    "backfill_days_per_run": 5
   },
   "holder_snapshot": {
     "as_of": "20260807",
     "available": true,
+    "snapshots_collected": 1,
+    "weekly_change_ready": false,
     "definition": "TDCC 持股分級 12–15 的集保庫存比例合計；第二週起才計算週增減。"
   },
   "source": "法人：TWSE 三大法人買賣超日報、TPEx 三大法人買賣明細；大戶：TDCC 集保戶股權分散表；價格與成交量：Yahoo Finance via yfinance。",

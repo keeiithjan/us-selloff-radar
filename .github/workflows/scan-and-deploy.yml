@@ -15,7 +15,10 @@ env:
   BINANCE_TOP_USDT_PAIRS: "40"
   PREMARKET_ABNORMAL_PCT: "2.0"
   PREMARKET_MAX_MOVERS: "12"
-  CHIP_RADAR_HISTORY_DAYS: "25"
+  # Maintain a two-year target history a few official-report dates at a time.
+  # Caching makes this safe for the 30-minute site refresh cadence.
+  CHIP_RADAR_HISTORY_DAYS: "520"
+  CHIP_RADAR_BACKFILL_DAYS_PER_RUN: "5"
   CHIP_RADAR_TOP_CANDIDATES: "30"
 
 permissions:
