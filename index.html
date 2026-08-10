@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260810-1">
+    <link rel="stylesheet" href="assets/styles.css?v=20260810-3">
   </head>
   <body>
     <main class="shell">
@@ -46,24 +46,17 @@
           </tv-ticker-tape>
         </div>
         <div id="futures-strip" class="futures-strip" aria-live="polite"></div>
-        <section class="taiwan-sentiment" aria-labelledby="taiwan-sentiment-title">
+        <section class="taiex-technical" aria-labelledby="taiex-technical-title">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">TAIWAN POSITIONING</p>
-              <h2 id="taiwan-sentiment-title">台股槓桿／風險對照</h2>
+              <p class="eyebrow">TAIWAN WEIGHTED ? 1H TECHNICAL</p>
+              <h2 id="taiex-technical-title">?????1 ?????</h2>
             </div>
-            <p id="taiwan-sentiment-updated" class="muted"></p>
+            <p id="taiex-technical-updated" class="muted"></p>
           </div>
-          <div id="taiwan-sentiment-kpis" class="taiwan-sentiment-kpis" aria-live="polite"></div>
-          <div class="sentiment-chart-heading">
-            <p>四張獨立刻度圖共用觀察期間；每張依自身波動範圍縮放，不以零點或指數刻度硬性對齊。</p>
-            <div class="sentiment-legend" aria-label="圖例">
-              <span class="index">加權指數</span><span class="short">外資空單</span>
-              <span class="margin">融資餘額</span><span class="vix">VIX</span>
-            </div>
-          </div>
-          <div id="taiwan-sentiment-chart" class="taiwan-sentiment-chart" aria-live="polite"></div>
-          <p id="taiwan-sentiment-source" class="sentiment-source"></p>
+          <p class="taiex-technical-note">?? TD Sequential 9?13??????? EMA 50?100 ?????????????? K ????</p>
+          <div id="taiex-technical-summary" class="taiex-technical-summary" aria-live="polite"></div>
+          <div id="taiex-technical-chart" class="taiex-technical-chart" aria-live="polite"></div>
         </section>
         <div class="premarket-heading">
           <div>
@@ -74,27 +67,6 @@
         </div>
         <div id="premarket-movers" class="premarket-movers" aria-live="polite"></div>
         <p id="premarket-empty" class="premarket-empty" hidden></p>
-      </section>
-
-      <section class="chip-radar" aria-labelledby="chip-radar-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">TAIWAN CHIP &amp; FLOW RADAR</p>
-            <h2 id="chip-radar-title">法人・大戶籌碼觀察</h2>
-          </div>
-          <p id="chip-radar-updated" class="muted"></p>
-        </div>
-        <p class="chip-radar-note">以外資、投信近 5 日流向、連續性、量價與 TDCC 大戶集中度組成研究分數；大戶週增減須累積至少兩週官方快照才會啟用。</p>
-        <div id="chip-radar-summary" class="chip-radar-summary" aria-live="polite"></div>
-        <div id="chip-radar-backtest" class="chip-radar-backtest" aria-live="polite"></div>
-        <div class="section-heading chip-candidate-heading">
-          <div>
-            <p class="eyebrow">FLOW WATCHLIST</p>
-            <h3>籌碼觀察名單</h3>
-          </div>
-          <p id="chip-radar-source" class="muted"></p>
-        </div>
-        <div id="chip-radar-candidates" class="chip-radar-candidates" aria-live="polite"></div>
       </section>
 
       <section class="status-grid" aria-label="掃描狀態">
@@ -187,6 +159,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260810-2"></script>
+    <script src="assets/app.js?v=20260810-3"></script>
   </body>
 </html>

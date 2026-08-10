@@ -12,13 +12,11 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 from dataclasses import dataclass
-from datetime import date as calendar_date, datetime, time as clock_time, timedelta, timezone
+from datetime import datetime, time as clock_time, timezone
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -26,11 +24,11 @@ import numpy as np
 import yfinance as yf
 
 from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, load_symbols
+from sequential import ai_momentum_features, sequential_history, trend_reclaim_events
 
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "market.json"
-TAIWAN_SENTIMENT_HISTORY_FILE = ROOT / "data" / "taiwan_sentiment_history.json"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 UTC = timezone.utc
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -39,14 +37,7 @@ REGULAR_OPEN = clock_time(9, 30)
 REGULAR_CLOSE = clock_time(16, 0)
 BINANCE_EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 BINANCE_TICKERS_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
-TAIFEX_FOREIGN_FUTURES_URL = "https://www.taifex.com.tw/cht/3/futContractsDate"
-TWSE_MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
 TAIWAN_INDEX_TICKER = "^TWII"
-VIX_TICKER = "^VIX"
-# The positioning view is a year-to-date relationship chart.  Data is cached
-# between Actions runs, so the initial backfill is the only expensive refresh.
-TAIWAN_SENTIMENT_DAYS = 300
-TAIWAN_SENTIMENT_REFRESH_DAYS = 6
 # Binance uses BRKB for Berkshire B, while Yahoo/TradingView use BRK-B.
 BINANCE_STOCK_ALIASES = {"BRKB": "BRK-B"}
 
@@ -58,80 +49,6 @@ class FutureSpec:
     tickers: tuple[str, ...]
     currency: str
     tradingview_symbol: str
-
-
-class PublicHtmlTables(HTMLParser):
-    """Read the simple public TAIFEX tables without adding a parser dependency."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.tables: list[list[list[str]]] = []
-        self._table: list[list[str]] | None = None
-        self._row: list[str] | None = None
-        self._cell: list[str] | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "table":
-            self._table = []
-        elif tag == "tr" and self._table is not None:
-            self._row = []
-        elif tag in {"td", "th"} and self._row is not None:
-            self._cell = []
-
-    def handle_data(self, data: str) -> None:
-        if self._cell is not None:
-            self._cell.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._cell is not None and self._row is not None:
-            value = " ".join("".join(self._cell).split())
-            self._row.append(value)
-            self._cell = None
-        elif tag == "tr" and self._row is not None and self._table is not None:
-            if self._row:
-                self._table.append(self._row)
-            self._row = None
-        elif tag == "table" and self._table is not None:
-            if self._table:
-                self.tables.append(self._table)
-            self._table = None
-
-
-FUTURES = (
-    # Yahoo's Taiwan near-month ticker can be unavailable to its global API.
-    # IX0126.TW is retained as an explicitly marked fallback quote.
-    FutureSpec("taiwan", "台指期", ("WTX&", "IX0126.TW"), "TWD", "TAIFEX:TXF1!"),
-    FutureSpec("nasdaq", "NASDAQ 100 期貨", ("NQ=F",), "USD", "CME_MINI:NQ1!"),
-    FutureSpec("dow", "道瓊期貨", ("YM=F",), "USD", "CBOT_MINI:YM1!"),
-    FutureSpec("sox", "SOX 期貨", ("SOX=F",), "USD", "CME_MINI:SOX1!"),
-    FutureSpec("russell", "Russell 2000 期貨", ("RTY=F",), "USD", "CME_MINI:RTY1!"),
-    # NKD is the USD-denominated CME Nikkei contract. It gives the dashboard
-    # an overnight Asia reference while the US market is closed.
-    FutureSpec("japan", "日經 225 期貨", ("NKD=F",), "USD", "CME:NKD1!"),
-    # Yahoo does not consistently expose KRX's continuous contract. Try a
-    # futures identifier first; otherwise label KOSPI 200 spot as a proxy.
-    FutureSpec("korea", "南韓 KOSPI 200 期貨", ("KOSPI200=F", "KOSPI200.KS"), "KRW", "KRX:K2I1!"),
-)
-
-# Large, liquid names that commonly lead broad US index, technology,
-# semiconductor, financial, consumer, industrial, healthcare and energy moves.
-PREMARKET_TICKERS = (
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "ORCL", "NFLX",
-    "AMD", "INTC", "MU", "ARM", "QCOM", "TXN", "AMAT", "LRCX", "KLAC", "SMCI",
-    "PLTR", "CRM", "ADBE", "NOW", "PANW", "CRWD", "UBER", "ABNB", "COIN", "HOOD",
-    "JPM", "BAC", "WFC", "GS", "MS", "V", "MA", "AXP", "BRK-B", "BLK",
-    "LLY", "UNH", "JNJ", "ABBV", "MRK", "ISRG", "TMO", "AMGN", "PFE", "GILD",
-    "WMT", "COST", "HD", "MCD", "NKE", "DIS", "SBUX", "KO", "PEP", "TGT",
-    "XOM", "CVX", "COP", "GE", "CAT", "BA", "DE", "HON", "LMT", "RTX",
-)
-
-PREMARKET_FALLBACKS = {
-    "BRK-B": Symbol("BRK-B", "NYSE", "綜合企業"),
-    "COIN": Symbol("COIN", "NASDAQ", "加密資產平台"),
-    "HOOD": Symbol("HOOD", "NASDAQ", "金融科技"),
-    "MA": Symbol("MA", "NYSE", "支付網路"),
-    "V": Symbol("V", "NYSE", "支付網路"),
-}
 
 
 def _positive_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
@@ -170,279 +87,140 @@ def clean_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def public_text(url: str, timeout: int = 20) -> str:
-    request = Request(url, headers={"User-Agent": "KJ-Radar-System/1.0"})
-    with urlopen(request, timeout=timeout) as response:  # nosec B310 - fixed public HTTPS sources
-        return response.read().decode("utf-8", errors="replace")
+def taiwan_weighted_technical_1h() -> dict[str, object]:
+    """Build a compact, completed-bar 1-hour TAIEX technical payload.
 
-
-def public_json(url: str, timeout: int = 20) -> object:
-    return json.loads(public_text(url, timeout=timeout))
-
-
-def integer_value(value: object) -> int | None:
-    try:
-        return int(str(value).replace(",", "").replace(" ", ""))
-    except (TypeError, ValueError):
-        return None
-
-
-def taifex_foreign_short_open_interest(day: calendar_date) -> int | None:
-    """Return foreign investors' gross short open interest in Taiwan index futures."""
-    query = urlencode(
-        {
-            "queryType": "1",
-            "queryDate": day.strftime("%Y/%m/%d"),
-            "doQuery": "1",
-        }
-    )
-    parser = PublicHtmlTables()
-    parser.feed(public_text(f"{TAIFEX_FOREIGN_FUTURES_URL}?{query}", timeout=25))
-    for table in parser.tables:
-        contract_name = ""
-        for row in table:
-            if len(row) >= 3 and row[0].strip().isdigit():
-                contract_name = row[1].strip()
-            if contract_name not in {"臺股期貨", "台股期貨"} or not row:
-                continue
-            if row[0].strip() != "外資" or len(row) < 10:
-                continue
-            # Columns 7–12 are OI long/amount, short/amount, net/amount.
-            return integer_value(row[9])
-    return None
-
-
-def twse_margin_balance(day: calendar_date) -> tuple[float, float] | None:
-    """Return listed-market financing balance and its daily change, in NT$ 100m."""
-    query = urlencode(
-        {
-            "date": day.strftime("%Y%m%d"),
-            "selectType": "ALL",
-            "response": "json",
-        }
-    )
-    payload = public_json(f"{TWSE_MARGIN_URL}?{query}", timeout=20)
-    if not isinstance(payload, dict):
-        return None
-    for table in payload.get("tables", []):
-        if not isinstance(table, dict):
-            continue
-        for row in table.get("data", []):
-            if not isinstance(row, list) or len(row) < 6:
-                continue
-            if str(row[0]).strip() != "融資金額(仟元)":
-                continue
-            previous = integer_value(row[4])
-            current = integer_value(row[5])
-            if previous is None or current is None:
-                return None
-            # The report unit is NT$ thousand; 100,000 thousand = NT$ 100m.
-            return current / 100_000, (current - previous) / 100_000
-    return None
-
-
-def taiwan_sentiment_snapshot(day: calendar_date) -> dict[str, object] | None:
-    short_open_interest = taifex_foreign_short_open_interest(day)
-    margin = twse_margin_balance(day)
-    if short_open_interest is None or margin is None:
-        return None
-    margin_balance, margin_daily_change = margin
-    return {
-        "date": day.isoformat(),
-        "foreign_short_open_interest": short_open_interest,
-        "margin_balance_100m": margin_balance,
-        "margin_daily_change_100m": margin_daily_change,
-    }
-
-
-def daily_close_map(ticker: str) -> dict[str, float]:
-    """Load a compact date-to-close mapping for an index or volatility series."""
-    try:
-        frame = yf.download(
-            ticker,
-            period="2y",
-            interval="1d",
-            auto_adjust=False,
-            progress=False,
-            threads=False,
-            timeout=20,
-            multi_level_index=False,
-        )
-    except Exception as exc:
-        logging.warning("Daily close download failed for %s: %s", ticker, exc)
-        return {}
-    cleaned = clean_frame(frame)
-    return {
-        pd.Timestamp(timestamp).date().isoformat(): round(float(row["Close"]), 4)
-        for timestamp, row in cleaned.iterrows()
-        if pd.notna(row.get("Close"))
-    }
-
-
-def taiwan_index_live_quote(index_closes: dict[str, float]) -> dict[str, object] | None:
-    """Return the most recent available intraday TAIEX quote with its own timestamp.
-
-    The daily relationship series intentionally remains end-of-day data because
-    foreign futures OI and margin balances are official daily publications.  This
-    separate quote keeps the headline TAIEX card current during the Taiwan session
-    without pretending that those two positioning series update intraday.
+    It reuses the dashboard's TD Sequential implementation and its white/yellow
+    momentum line plus EMA 50/100 trend-band calculation.  The page receives
+    only the latest 84 completed bars, rather than embedding an opaque chart.
     """
     try:
-        frame = yf.download(
+        raw = yf.download(
             TAIWAN_INDEX_TICKER,
-            period="2d",
-            interval="1m",
+            period="60d",
+            interval="60m",
             auto_adjust=False,
             progress=False,
             threads=False,
-            timeout=20,
+            timeout=25,
             multi_level_index=False,
         )
     except Exception as exc:
-        logging.warning("Live Taiwan index download failed: %s", exc)
-        return None
-    if frame.empty or "Close" not in frame.columns:
-        return None
-    closes = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-    if closes.empty:
-        return None
-    timestamp = pd.Timestamp(closes.index[-1])
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize(TAIPEI)
-    else:
-        timestamp = timestamp.tz_convert(TAIPEI)
-    price = round(float(closes.iloc[-1]), 2)
-    quote_date = timestamp.date().isoformat()
-    prior_dates = [key for key in index_closes if key < quote_date]
-    previous_close = index_closes[max(prior_dates)] if prior_dates else None
-    change = round(price - float(previous_close), 2) if previous_close is not None else None
-    return {
-        "price": price,
-        "timestamp": timestamp.isoformat(),
-        "date": quote_date,
-        "previous_close": previous_close,
-        "change": change,
-        "change_pct": round((change / float(previous_close)) * 100, 3) if change is not None and previous_close else None,
-    }
+        logging.warning("Taiwan weighted 1h download failed: %s", exc)
+        return {"available": False, "reason": "台灣加權 1 小時資料暫時無法取得。"}
+    if raw.empty or not {"Open", "High", "Low", "Close", "Volume"}.issubset(raw.columns):
+        return {"available": False, "reason": "台灣加權 1 小時資料不足。"}
 
+    frame = raw.copy()
+    for column in ("Open", "High", "Low", "Close", "Volume"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["Open", "High", "Low", "Close", "Volume"]).sort_index()
+    # The final bar can still be forming while Taiwan is open.  Excluding it
+    # keeps the TD and crossover calculations equivalent to confirmed bars.
+    if len(frame) > 2:
+        frame = frame.iloc[:-1]
+    if len(frame) < 130:
+        return {"available": False, "reason": "台灣加權 1 小時已完成 K 棒不足，暫無法計算趨勢帶。"}
 
-def latest_close_on_or_before(values: dict[str, float], day: str) -> float | None:
-    available = [key for key in values if key <= day]
-    if not available:
-        return None
-    return values[max(available)]
+    features = ai_momentum_features(frame)
+    _, sequential_events = sequential_history(frame)
+    reclaim_events = trend_reclaim_events(features)
+    start = max(0, len(frame) - 84)
+    labels_by_position: dict[int, list[str]] = {}
+    for event in sequential_events:
+        position = int(event["position"])
+        if position >= start:
+            labels_by_position[position] = [str(label) for label in event["labels"]]
 
-
-def load_taiwan_sentiment_history() -> dict[str, dict[str, object]]:
-    if not TAIWAN_SENTIMENT_HISTORY_FILE.exists():
-        return {}
-    try:
-        payload = json.loads(TAIWAN_SENTIMENT_HISTORY_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    points = payload.get("points", []) if isinstance(payload, dict) else []
-    return {
-        str(point.get("date")): dict(point)
-        for point in points
-        if isinstance(point, dict) and point.get("date")
-    }
-
-
-def save_taiwan_sentiment_history(points: list[dict[str, object]]) -> None:
-    TAIWAN_SENTIMENT_HISTORY_FILE.parent.mkdir(exist_ok=True)
-    payload = {"schema_version": 1, "points": points}
-    TAIWAN_SENTIMENT_HISTORY_FILE.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-def recent_weekdays(now: datetime, count: int) -> list[calendar_date]:
-    latest = now.astimezone(TAIPEI).date()
-    days: list[calendar_date] = []
-    cursor = latest
-    while len(days) < count:
-        if cursor.weekday() < 5:
-            days.append(cursor)
-        cursor -= timedelta(days=1)
-    return days
-
-
-def year_to_date_weekdays(now: datetime) -> list[calendar_date]:
-    """Return each weekday from January 1 through the current Taiwan date."""
-    latest = now.astimezone(TAIPEI).date()
-    cursor = calendar_date(latest.year, 1, 1)
-    days: list[calendar_date] = []
-    while cursor <= latest:
-        if cursor.weekday() < 5:
-            days.append(cursor)
-        cursor += timedelta(days=1)
-    return days
-
-
-def build_taiwan_sentiment(now: datetime) -> dict[str, object]:
-    """Build a year-to-date Taiwan positioning history and cache it between runs."""
-    target_days = _positive_int_env("TAIWAN_SENTIMENT_DAYS", TAIWAN_SENTIMENT_DAYS, 10, 300)
-    history = load_taiwan_sentiment_history()
-    ytd_days = year_to_date_weekdays(now)[-target_days:]
-    refresh_days = recent_weekdays(now, TAIWAN_SENTIMENT_REFRESH_DAYS)
-    requested_days = list(
-        dict.fromkeys(
-            [day for day in ytd_days if day.isoformat() not in history]
-            + refresh_days
-        )
-    )
-    index_closes = daily_close_map(TAIWAN_INDEX_TICKER)
-    vix_closes = daily_close_map(VIX_TICKER)
-    live_index = taiwan_index_live_quote(index_closes)
-
-    snapshots: list[dict[str, object]] = []
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {executor.submit(taiwan_sentiment_snapshot, day): day for day in requested_days}
-        for future in as_completed(futures):
-            day = futures[future]
-            try:
-                snapshot = future.result()
-            except Exception as exc:
-                logging.info("Taiwan sentiment source unavailable for %s: %s", day, exc)
-                continue
-            if snapshot is not None:
-                snapshots.append(snapshot)
-
-    for snapshot in snapshots:
-        day = str(snapshot["date"])
-        index_close = index_closes.get(day)
-        vix_close = latest_close_on_or_before(vix_closes, day)
-        if index_close is None or vix_close is None:
+    recent_td_events: list[dict[str, object]] = []
+    for event in sequential_events:
+        position = int(event["position"])
+        if position < start:
             continue
-        snapshot["index_close"] = index_close
-        snapshot["vix_close"] = vix_close
-        history[day] = snapshot
+        timestamp = pd.Timestamp(frame.index[position])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize(TAIPEI)
+        else:
+            timestamp = timestamp.tz_convert(TAIPEI)
+        recent_td_events.append(
+            {
+                "time": timestamp.isoformat(),
+                "labels": [str(label) for label in event["labels"]],
+                "age_bars": len(frame) - 1 - position,
+            }
+        )
 
-    ytd_keys = {day.isoformat() for day in ytd_days}
-    ordered = [history[key] for key in sorted(history) if key in ytd_keys]
-    previous: dict[str, object] | None = None
-    for point in ordered:
-        for key, change_key in (
-            ("index_close", "index_daily_change"),
-            ("foreign_short_open_interest", "foreign_short_daily_change"),
-            ("margin_balance_100m", "margin_daily_change_100m"),
-            ("vix_close", "vix_daily_change"),
-        ):
-            value = float(point[key])
-            point[change_key] = round(value - float(previous[key]), 4) if previous else None
-        previous = point
+    def finite(value: object) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return round(number, 2) if np.isfinite(number) else None
 
-    save_taiwan_sentiment_history(ordered)
+    bars: list[dict[str, object]] = []
+    for position in range(start, len(frame)):
+        timestamp = pd.Timestamp(frame.index[position])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize(TAIPEI)
+        else:
+            timestamp = timestamp.tz_convert(TAIPEI)
+        feature = features.iloc[position]
+        bars.append(
+            {
+                "time": timestamp.isoformat(),
+                "open": finite(frame["Open"].iloc[position]),
+                "high": finite(frame["High"].iloc[position]),
+                "low": finite(frame["Low"].iloc[position]),
+                "close": finite(frame["Close"].iloc[position]),
+                "white": finite(feature["white_kernel"]),
+                "yellow": finite(feature["yellow_mid"]),
+                "ribbon_lower": finite(feature["trend_lower_edge"]),
+                "ribbon_upper": finite(feature["trend_upper_edge"]),
+                "td_labels": labels_by_position.get(position, []),
+            }
+        )
+
+    latest = bars[-1]
+    price = float(latest["close"])
+    ribbon_lower = latest["ribbon_lower"]
+    ribbon_upper = latest["ribbon_upper"]
+    if ribbon_lower is None or ribbon_upper is None:
+        ribbon_position = "資料不足"
+    elif price > float(ribbon_upper):
+        ribbon_position = "趨勢帶上方"
+    elif price < float(ribbon_lower):
+        ribbon_position = "趨勢帶下方"
+    else:
+        ribbon_position = "趨勢帶內"
+    white = latest["white"]
+    yellow = latest["yellow"]
+    if white is None or yellow is None:
+        line_state = "白／黃線資料不足"
+    elif float(white) > float(yellow):
+        line_state = "白線在黃線上方"
+    else:
+        line_state = "白線在黃線下方"
+    latest_reclaim = reclaim_events[-1] if reclaim_events else None
+    reclaim_age = len(frame) - 1 - int(latest_reclaim["position"]) if latest_reclaim else None
     return {
-        "label": f"{now.astimezone(TAIPEI).year} 年迄今｜{len(ordered)} 個交易日",
-        "time_window": "year_to_date",
-        "points": ordered,
-        "live_index": live_index,
-        "source": (
-            "加權指數：Yahoo Finance via yfinance（圖表為日線、卡片另顯示最新可得 1 分鐘報價）；"
-            "VIX：Yahoo Finance 日線；外資空單：臺灣期貨交易所臺股期貨外資未平倉空方口數；"
-            "融資餘額：臺灣證券交易所上市信用交易統計的融資金額（仟元，換算億元）。"
-        ),
+        "available": True,
+        "symbol": "TVC:TWII",
+        "interval": "60",
+        "bars": bars,
+        "updated_at_utc": latest["time"],
+        "latest_price": latest["close"],
+        "latest_td_labels": latest["td_labels"],
+        "recent_td_events": recent_td_events[-6:],
+        "trend": {
+            "ribbon_position": ribbon_position,
+            "line_state": line_state,
+            "white": white,
+            "yellow": yellow,
+            "ribbon_lower": ribbon_lower,
+            "ribbon_upper": ribbon_upper,
+            "last_long_reclaim_bars_ago": reclaim_age,
+        },
+        "source": "台灣加權指數 1 小時 OHLCV：Yahoo Finance via yfinance；僅納入已完成 K 棒。",
     }
 
 
@@ -793,17 +571,14 @@ def main() -> None:
             )
 
     try:
-        taiwan_sentiment = build_taiwan_sentiment(now)
+        taiwan_weighted_1h = taiwan_weighted_technical_1h()
     except Exception as exc:
-        logging.warning("Taiwan sentiment refresh failed: %s", exc)
-        taiwan_sentiment = {
-            "label": "資料更新中",
-            "time_window": "year_to_date",
-            "points": [],
-            "live_index": None,
-            "source": "台股籌碼資料暫時無法更新。",
+        logging.warning("Taiwan weighted technical refresh failed: %s", exc)
+        taiwan_weighted_1h = {
+            "available": False,
+            "reason": "Taiwan weighted 1-hour technical data is temporarily unavailable",
         }
-        errors.append("台股籌碼資料更新失敗")
+        errors.append("Taiwan weighted 1-hour technical refresh failed")
 
     try:
         all_symbols = load_symbols(SYMBOLS_FILE)
@@ -837,7 +612,7 @@ def main() -> None:
         {
             "updated_at_utc": now.isoformat(),
             "futures": futures,
-            "taiwan_sentiment": taiwan_sentiment,
+            "taiwan_weighted_1h": taiwan_weighted_1h,
             "premarket": {
                 "active": premarket_active,
                 "binance_equity_enabled": bool(binance_contracts),
@@ -851,9 +626,9 @@ def main() -> None:
         }
     )
     logging.info(
-        "Market pulse refreshed: %s futures, %s Taiwan sentiment points, %s pre-market movers",
+        "Market pulse refreshed: %s futures, %s Taiwan 1h bars, %s pre-market movers",
         len(futures),
-        len(taiwan_sentiment.get("points", [])),
+        len(taiwan_weighted_1h.get("bars", [])),
         len(movers),
     )
 

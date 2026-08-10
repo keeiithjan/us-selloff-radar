@@ -15,11 +15,6 @@ env:
   BINANCE_TOP_USDT_PAIRS: "40"
   PREMARKET_ABNORMAL_PCT: "2.0"
   PREMARKET_MAX_MOVERS: "12"
-  # Maintain a two-year target history a few official-report dates at a time.
-  # Caching makes this safe for the 30-minute site refresh cadence.
-  CHIP_RADAR_HISTORY_DAYS: "520"
-  CHIP_RADAR_BACKFILL_DAYS_PER_RUN: "5"
-  CHIP_RADAR_TOP_CANDIDATES: "30"
 
 permissions:
   contents: read
@@ -49,22 +44,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Taiwan sentiment history
-        uses: actions/cache/restore@v4
-        with:
-          path: data/taiwan_sentiment_history.json
-          key: taiwan-sentiment-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            taiwan-sentiment-${{ github.ref_name }}-
-
-      - name: Restore chip radar history
-        uses: actions/cache/restore@v4
-        with:
-          path: data/chip_radar_history.json
-          key: chip-radar-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chip-radar-${{ github.ref_name }}-
-
       - name: Install scanner dependencies
         run: python -m pip install -r requirements.txt
 
@@ -74,29 +53,8 @@ jobs:
       - name: Refresh market pulse data
         run: python market_pulse.py
 
-      - name: Save Taiwan sentiment history
-        if: ${{ always() && hashFiles('data/taiwan_sentiment_history.json') != '' }}
-        uses: actions/cache/save@v4
-        with:
-          path: data/taiwan_sentiment_history.json
-          key: taiwan-sentiment-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-
       - name: Refresh Sequential multi-timeframe data
         run: python sequential.py
-
-      - name: Refresh Taiwan chip radar data
-        run: python chip_radar.py
-
-      - name: Save chip radar history
-        if: ${{ always() && hashFiles('data/chip_radar_history.json') != '' }}
-        uses: actions/cache/save@v4
-        with:
-          path: data/chip_radar_history.json
-          key: chip-radar-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Remove private cache files from Pages artifact
-        if: ${{ always() }}
-        run: rm -f data/taiwan_sentiment_history.json data/chip_radar_history.json
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
