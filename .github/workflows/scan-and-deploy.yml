@@ -5,9 +5,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # Every 8 minutes without a short gap at the UTC hour boundary.
-    - cron: "3,11,19,27,35,43,51,59 0,2,4,6,8,10,12,14,16,18,20,22 * * 1-5"
-    - cron: "7,15,23,31,39,47,55 1,3,5,7,9,11,13,15,17,19,21,23 * * 1-5"
+    # A complete multi-market scan plus Pages deployment can take several
+    # minutes.  Thirty-minute spacing prevents scheduled runs from queuing
+    # behind one another and leaving a newer site version undeployed.
+    - cron: "7,37 * * * 1-5"
 
 env:
   RECENT_SIGNAL_BARS: "5"
@@ -29,7 +30,9 @@ concurrency:
 jobs:
   scan-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Allow temporary upstream data-source slowness without killing a valid
+    # scan before it reaches the Pages deployment step.
+    timeout-minutes: 25
     environment:
       name: github-pages
     steps:
