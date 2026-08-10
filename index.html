@@ -30,6 +30,21 @@
           </div>
           <p id="market-pulse-updated" class="muted"></p>
         </div>
+        <div class="live-ticker-shell" aria-label="TradingView 即時市場行情帶">
+          <div class="live-ticker-heading">
+            <span class="live-dot" aria-hidden="true"></span>
+            <span>TRADINGVIEW LIVE TAPE</span>
+            <small>即時跳動由 TradingView 提供；盤別與延遲依交易所資料權限而定</small>
+          </div>
+          <tv-ticker-tape
+            symbols="TVC:TWII,CME_MINI:NQ1!,CBOT_MINI:YM1!,CME_MINI:RTY1!,TVC:SOX,TVC:NI225,TVC:KOSPI"
+            direction="horizontal"
+            item-size="compact"
+            theme="dark"
+            locale="zh_TW"
+            show-symbol-logo="false">
+          </tv-ticker-tape>
+        </div>
         <div id="futures-strip" class="futures-strip" aria-live="polite"></div>
         <section class="taiwan-sentiment" aria-labelledby="taiwan-sentiment-title">
           <div class="section-heading">
@@ -59,6 +74,27 @@
         </div>
         <div id="premarket-movers" class="premarket-movers" aria-live="polite"></div>
         <p id="premarket-empty" class="premarket-empty" hidden></p>
+      </section>
+
+      <section class="chip-radar" aria-labelledby="chip-radar-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">TAIWAN CHIP &amp; FLOW RADAR</p>
+            <h2 id="chip-radar-title">法人・大戶籌碼觀察</h2>
+          </div>
+          <p id="chip-radar-updated" class="muted"></p>
+        </div>
+        <p class="chip-radar-note">以外資、投信近 5 日流向、連續性、量價與 TDCC 大戶集中度組成研究分數；大戶週增減須累積至少兩週官方快照才會啟用。</p>
+        <div id="chip-radar-summary" class="chip-radar-summary" aria-live="polite"></div>
+        <div id="chip-radar-backtest" class="chip-radar-backtest" aria-live="polite"></div>
+        <div class="section-heading chip-candidate-heading">
+          <div>
+            <p class="eyebrow">FLOW WATCHLIST</p>
+            <h3>籌碼觀察名單</h3>
+          </div>
+          <p id="chip-radar-source" class="muted"></p>
+        </div>
+        <div id="chip-radar-candidates" class="chip-radar-candidates" aria-live="polite"></div>
       </section>
 
       <section class="status-grid" aria-label="掃描狀態">
@@ -150,6 +186,7 @@
         <p>資料僅供研究與監控，不是投資建議或買賣訊號。下單前請自行核實即時報價、公司行動與市場狀況。</p>
       </footer>
     </main>
-    <script src="assets/app.js?v=20260810-1"></script>
+    <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
+    <script src="assets/app.js?v=20260810-2"></script>
   </body>
 </html>

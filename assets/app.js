@@ -17,6 +17,11 @@ const elements = {
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
+  chipRadarUpdated: document.querySelector("#chip-radar-updated"),
+  chipRadarSummary: document.querySelector("#chip-radar-summary"),
+  chipRadarBacktest: document.querySelector("#chip-radar-backtest"),
+  chipRadarCandidates: document.querySelector("#chip-radar-candidates"),
+  chipRadarSource: document.querySelector("#chip-radar-source"),
   taiwanSentimentUpdated: document.querySelector("#taiwan-sentiment-updated"),
   taiwanSentimentKpis: document.querySelector("#taiwan-sentiment-kpis"),
   taiwanSentimentChart: document.querySelector("#taiwan-sentiment-chart"),
@@ -945,6 +950,163 @@ function renderMarketPulse(payload) {
   motionState.hasMarket = true;
 }
 
+function formatShares(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return `${new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(Math.abs(number) / 1000)} 張`;
+}
+
+function formatPercent(value, digits = 2) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${formatSigned(number, digits)}%` : "—";
+}
+
+function makeChipKpi(label, value, detail, tone = "") {
+  const card = document.createElement("article");
+  card.className = `chip-kpi ${tone}`.trim();
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  const valueNode = document.createElement("strong");
+  valueNode.textContent = value;
+  const detailNode = document.createElement("small");
+  detailNode.textContent = detail;
+  card.append(labelNode, valueNode, detailNode);
+  return card;
+}
+
+function makeChipFact(label, value) {
+  const fact = document.createElement("div");
+  fact.className = "chip-fact";
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  const valueNode = document.createElement("b");
+  valueNode.textContent = value;
+  fact.append(labelNode, valueNode);
+  return fact;
+}
+
+function makeChipCandidate(candidate) {
+  const card = document.createElement("article");
+  card.className = `chip-candidate${candidate.qualified ? " qualified" : ""}`;
+
+  const top = document.createElement("div");
+  top.className = "chip-candidate-top";
+  const titleGroup = document.createElement("div");
+  const title = document.createElement("h4");
+  title.textContent = `${candidate.symbol} ${candidate.name || ""}`.trim();
+  const subtitle = document.createElement("p");
+  subtitle.className = "chip-candidate-name";
+  subtitle.textContent = `${industryText(candidate.industry)} · ${candidate.exchange || "TWSE"}`;
+  titleGroup.append(title, subtitle);
+  const score = document.createElement("span");
+  score.className = "chip-score";
+  score.textContent = `分數 ${Number(candidate.score || 0).toFixed(1)}`;
+  top.append(titleGroup, score);
+
+  const priceRow = document.createElement("div");
+  priceRow.className = "chip-candidate-price";
+  const price = document.createElement("strong");
+  price.textContent = formatMarketPrice(candidate.last_price, "TWD");
+  const today = makeTodayChange(candidate.today_change_pct);
+  priceRow.append(price);
+  if (today) priceRow.append(today);
+
+  const facts = document.createElement("div");
+  facts.className = "chip-facts";
+  const foreignDirection = Number(candidate.foreign_5_shares) >= 0 ? "+" : "−";
+  const trustDirection = Number(candidate.trust_5_shares) >= 0 ? "+" : "−";
+  facts.append(
+    makeChipFact("外資近 5 日", `${foreignDirection}${formatShares(candidate.foreign_5_shares)}`),
+    makeChipFact("投信近 5 日", `${trustDirection}${formatShares(candidate.trust_5_shares)}`),
+    makeChipFact("大戶持股 12–15", Number.isFinite(Number(candidate.large_holder_pct)) ? `${Number(candidate.large_holder_pct).toFixed(2)}%` : "等待資料"),
+    makeChipFact("大戶週增減", Number.isFinite(Number(candidate.large_holder_weekly_change_pct)) ? formatPercent(candidate.large_holder_weekly_change_pct, 3) : "等待下週快照")
+  );
+
+  const values = (Array.isArray(candidate.sparkline) ? candidate.sparkline : []).map(Number).filter(Number.isFinite);
+  const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
+  const sparkline = makeSparkline(values, direction, true, {
+    title: "最近 30 個交易日收盤走勢",
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
+
+  const foot = document.createElement("div");
+  foot.className = "chip-card-foot";
+  const status = document.createElement("span");
+  status.textContent = candidate.qualified
+    ? `法人連續：外資 ${Number(candidate.foreign_positive_days || 0)}/5、投信 ${Number(candidate.trust_positive_days || 0)}/5；${candidate.above_ma20 ? "站上" : "跌破"} 20 日均線`
+    : "分數未達目前觀察門檻；保留作相對比較。";
+  foot.append(status, makeTradingViewLink(candidate, "D"));
+  card.append(top, priceRow, facts);
+  if (sparkline) card.append(sparkline);
+  card.append(foot);
+  return card;
+}
+
+function renderChipBacktest(backtest) {
+  const panel = document.createElement("article");
+  panel.className = "chip-backtest";
+  const head = document.createElement("div");
+  head.className = "chip-backtest-head";
+  const title = document.createElement("h3");
+  title.textContent = "基準模型回測・下一交易日開盤至第 5 日收盤";
+  const avg = Number(backtest && backtest.average_return_5d_pct);
+  const winRate = Number(backtest && backtest.win_rate_pct);
+  const validated = Boolean(backtest && backtest.ready && avg > 0 && winRate >= 50);
+  const status = document.createElement("p");
+  status.className = `chip-backtest-status${validated ? " valid" : ""}`;
+  status.textContent = validated ? "樣本內暫時通過" : "目前未通過驗證";
+  head.append(title, status);
+  const explanation = document.createElement("p");
+  if (!backtest || !backtest.ready) {
+    explanation.textContent = (backtest && backtest.reason) || "正在累積足夠的法人歷史資料後才能計算回測。";
+  } else if (!validated) {
+    explanation.textContent = "目前基準模型的 5 日平均報酬或勝率未達驗證門檻；因此下方僅是籌碼觀察名單，不標示為「可能發動」。模型會持續保留資料，之後再做樣本外驗證。";
+  } else {
+    explanation.textContent = "基準模型在目前樣本中暫時為正，但仍須以樣本外、不同盤勢與交易成本測試，不能視為投資建議。";
+  }
+  const metrics = document.createElement("div");
+  metrics.className = "chip-backtest-metrics";
+  if (backtest && backtest.ready) {
+    metrics.append(
+      Object.assign(document.createElement("span"), { textContent: `樣本訊號：${Number(backtest.signals || 0)}` }),
+      Object.assign(document.createElement("span"), { textContent: `勝率：${Number(backtest.win_rate_pct || 0).toFixed(1)}%` }),
+      Object.assign(document.createElement("span"), { textContent: `5 日平均：${formatPercent(backtest.average_return_5d_pct)}` }),
+      Object.assign(document.createElement("span"), { textContent: `中位數：${formatPercent(backtest.median_return_5d_pct)}` }),
+      Object.assign(document.createElement("span"), { textContent: `期間：${backtest.period_start || "—"} 至 ${backtest.period_end || "—"}` })
+    );
+  }
+  panel.append(head, explanation, metrics);
+  return panel;
+}
+
+function renderChipRadar(payload) {
+  if (!payload || !elements.chipRadarSummary) return;
+  const backtest = payload.backtest || {};
+  const average = Number(backtest.average_return_5d_pct);
+  const holder = payload.holder_snapshot || {};
+  const backtestTone = backtest.ready && average > 0 && Number(backtest.win_rate_pct) >= 50 ? "positive" : "warning";
+  const backtestValue = backtest.ready ? formatPercent(average) : "資料累積中";
+  elements.chipRadarUpdated.textContent = payload.updated_at_utc
+    ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
+    : "等待籌碼資料";
+  elements.chipRadarSummary.replaceChildren(
+    makeChipKpi("符合目前觀察門檻", `${Number(payload.qualified_candidates || 0)} 檔`, `${payload.universe_label || "台股觀察名單"} · 已取得價格 ${Number(payload.priced_symbols || 0)} 檔`, "positive"),
+    makeChipKpi("TDCC 大戶資料", holder.as_of || "等待資料", holder.available ? "持股分級 12–15 已讀取；週增減需下週快照" : "官方週資料暫時不可用"),
+    makeChipKpi("基準回測 5 日平均", backtestValue, backtest.ready ? `勝率 ${Number(backtest.win_rate_pct || 0).toFixed(1)}% · 訊號 ${Number(backtest.signals || 0)} 筆` : "尚未有足夠完整樣本", backtestTone)
+  );
+  elements.chipRadarBacktest.replaceChildren(renderChipBacktest(backtest));
+  elements.chipRadarSource.textContent = payload.source || "";
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  if (candidates.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "timeframe-empty";
+    empty.textContent = "目前沒有可呈現的籌碼觀察資料。";
+    elements.chipRadarCandidates.replaceChildren(empty);
+  } else {
+    elements.chipRadarCandidates.replaceChildren(...candidates.map(makeChipCandidate));
+  }
+}
+
 function makeSequentialSignal(signal, interval) {
   const card = document.createElement("article");
   card.className = `sequential-signal ${signal.side || "mixed"}`;
@@ -1088,6 +1250,17 @@ function makeTrendReclaimSignal(signal, interval) {
   if (sparkline) sparkline.classList.add("signal-sparkline");
   card.append(top, details, rule);
   if (sparkline) card.append(sparkline);
+  const legend = document.createElement("p");
+  legend.className = "trend-sparkline-legend";
+  const death = document.createElement("span");
+  const deathDot = document.createElement("i");
+  death.append(deathDot, document.createTextNode("橘點：死亡交叉"));
+  const reclaim = document.createElement("span");
+  const reclaimDot = document.createElement("i");
+  reclaimDot.className = "reclaim-dot";
+  reclaim.append(reclaimDot, document.createTextNode("藍點：站回白線確認"));
+  legend.append(death, reclaim);
+  card.append(legend);
   card.append(makeTradingViewLink(signal, interval));
   return card;
 }
@@ -1200,14 +1373,16 @@ async function refresh() {
   elements.refresh.disabled = true;
   elements.refresh.textContent = "更新中…";
   try {
-    const [alerts, sequential, market] = await Promise.all([
+    const [alerts, sequential, market, chipRadar] = await Promise.all([
       loadJson("data/alerts.json"),
       loadJson("data/sequential.json"),
       loadJson("data/market.json"),
+      loadJson("data/chip_radar.json"),
     ]);
     renderSelloff(alerts);
     renderSequential(sequential);
     renderMarketPulse(market);
+    renderChipRadar(chipRadar);
   } catch (error) {
     elements.status.textContent = "資料讀取失敗";
     elements.source.textContent = "請稍後重試；若持續發生，請查看 GitHub Actions 的最近執行結果。";
