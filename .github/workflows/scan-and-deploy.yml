@@ -51,7 +51,15 @@ jobs:
         run: python scanner.py
 
       - name: Refresh market pulse data
+        id: market_pulse
+        continue-on-error: true
         run: python market_pulse.py
+
+      - name: Preserve last market snapshot if a public source fails
+        if: ${{ steps.market_pulse.outcome == 'failure' }}
+        run: |
+          echo "::warning::Market pulse refresh failed; deploying the last committed market snapshot instead."
+          test -s data/market.json
 
       - name: Refresh Sequential multi-timeframe data
         run: python sequential.py
