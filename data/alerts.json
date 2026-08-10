@@ -1,7 +1,7 @@
 {
-  "updated_at_utc": null,
+  "updated_at_utc": "2026-08-10T03:26:14.983164+00:00",
   "market_status": "closed",
   "scanned_symbols": 0,
-  "source": "首次部署後，GitHub Actions 會在美股一般盤的掃描排程中更新資料。",
+  "source": "Yahoo Finance via yfinance; research/monitoring only, not an executable quote.",
   "alerts": []
 }
