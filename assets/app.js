@@ -186,8 +186,15 @@ function makeTradingViewLink(item, interval) {
 }
 
 function industryText(item) {
-  const product = typeof item === "string" ? item : item?.product_category || item?.industry;
-  return `主力產品｜${product || "待建檔"}`;
+  if (typeof item === "string") return `產品分類｜${item}`;
+  const product = String(item?.product_category || "").trim();
+  const industry = String(item?.industry || "").trim();
+  // Old JSON payloads may still contain the former placeholder.  Prefer the
+  // exchange-supplied industry until the next complete scan replaces them.
+  if (product.startsWith("產業分類：")) return product;
+  if (product && !/待建檔|待分類/.test(product)) return `主力產品｜${product}`;
+  if (industry) return `產業分類｜${industry}`;
+  return "產業分類｜暫無公開分類";
 }
 
 function displayMarket(market) {

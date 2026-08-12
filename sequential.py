@@ -290,13 +290,13 @@ def product_category_for(instrument: Instrument) -> str:
         if category:
             return category
         if instrument.industry:
-            return f"主力產品待建檔（{instrument.industry}）"
-        return "主力產品待建檔"
+            return f"產業分類：{instrument.industry}"
+        return "產業分類：交易所未提供"
     if instrument.market == "幣安現貨":
         return "加密資產／USDT 現貨"
     if instrument.market == "Pepperstone 外匯":
         return "高流動性外匯貨幣對"
-    return instrument.industry or "主力產品待建檔"
+    return instrument.industry or "產業分類：交易所未提供"
 
 
 def fetch_taifex_stock_futures() -> dict[str, str]:
