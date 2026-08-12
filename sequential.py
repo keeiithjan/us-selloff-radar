@@ -33,6 +33,7 @@ from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_sessi
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
+TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
@@ -54,6 +55,47 @@ TAIWAN_INDUSTRY_NAMES = {
     "29": "電子通路業", "30": "資訊服務業", "31": "其他電子業", "32": "文化創意業",
     "33": "農業科技業", "34": "電子商務業", "35": "綠能環保業", "36": "數位雲端業",
     "37": "運動休閒業", "38": "居家生活業",
+}
+
+# Taiwan exchange classifications describe an industry, not the product that
+# drives a signal.  Keep a focused product taxonomy for the actively monitored
+# names so cards can distinguish, for example, CPO from ABF substrates instead
+# of placing both under the broad "電子零組件業" label.  Unmapped names remain
+# explicitly marked rather than being assigned a speculative product.
+TAIWAN_PRODUCT_CATEGORIES = {
+    # Foundry, memory, IC design and packaging
+    "2330": "先進製程晶圓代工", "2303": "成熟製程晶圓代工", "5347": "特殊製程晶圓代工",
+    "6770": "成熟製程晶圓代工", "2408": "DRAM 記憶體", "2344": "利基型記憶體",
+    "2337": "快閃記憶體", "2454": "手機／邊緣 AI SoC", "3034": "顯示驅動 IC",
+    "3443": "特殊應用 IC（ASIC）", "3661": "AI／高速運算 ASIC", "5269": "特殊應用 IC（ASIC）",
+    "3529": "矽智財／嵌入式記憶體", "6531": "利基記憶體 IC", "2379": "網通／音訊 IC",
+    "3035": "IC 設計服務", "3711": "先進封裝／測試", "6239": "記憶體封裝測試",
+    "2449": "半導體測試", "3264": "功率半導體", "6415": "電源管理 IC",
+    # CPO / optical communications
+    "3163": "CPO／矽光子光通訊", "3363": "CPO／矽光子光通訊", "4979": "CPO／矽光子光通訊",
+    "6442": "CPO／矽光子光通訊", "3081": "高速光收發模組", "4908": "高速光收發模組",
+    "3450": "高速光收發模組", "3362": "光學鏡頭／光通訊元件", "4971": "磊晶／光電材料",
+    # ABF, PCB and materials
+    "3037": "ABF 載板", "3189": "ABF 載板", "8046": "ABF 載板／高階 PCB",
+    "2368": "高階伺服器 PCB", "3044": "高階 PCB", "2313": "HDI／軟硬板 PCB",
+    "4958": "高階 PCB／IC 載板", "2383": "銅箔基板（CCL）", "6274": "銅箔基板（CCL）",
+    "6278": "銅箔基板（CCL）", "6269": "軟板／手機 PCB", "8155": "PCB 鑽針／耗材",
+    # AI servers, power and networking
+    "2382": "AI 伺服器 ODM", "3231": "AI 伺服器 ODM", "2356": "AI 伺服器 ODM",
+    "6669": "雲端 AI 伺服器", "2324": "筆電／伺服器 ODM", "4938": "消費電子 ODM",
+    "2376": "伺服器／主機板", "2377": "電競／主機板", "2353": "筆電／顯示器",
+    "2308": "資料中心電源／散熱", "2301": "電源供應器／光電", "3017": "網通／顯示器",
+    "2345": "網通設備", "5388": "網通交換器", "2344": "利基型記憶體",
+    # Components, displays and storage
+    "2327": "被動元件", "2492": "被動元件", "2375": "被動元件", "2498": "被動元件",
+    "3008": "高階手機鏡頭", "3406": "手機鏡頭／光學元件", "3481": "面板模組",
+    "2409": "面板", "3481": "面板模組", "2354": "觸控面板", "3702": "手機鏡頭／感測模組",
+    "2371": "硬碟／資料儲存", "2352": "記憶體模組", "2347": "IT 通路／企業設備",
+    # EV, industrial and healthcare
+    "1519": "車用馬達／電動車零組件", "1522": "汽車零組件", "2201": "汽車整車",
+    "2395": "車用電子／網通", "3552": "ADAS／車用電子", "1536": "工具機／自動化",
+    "2049": "上銀精密傳動／自動化", "1590": "精密機械／自動化", "4137": "生技新藥",
+    "6472": "生技醫療通路", "4743": "醫療耗材",
 }
 
 
@@ -204,6 +246,20 @@ def fetch_taiwan_industries() -> dict[str, str]:
             if re.fullmatch(r"\d{4,6}[A-Z]?", code) and industry:
                 industries[code] = industry
     return industries
+
+
+def product_category_for(instrument: Instrument) -> str:
+    """Return a concise, product-led label for UI cards and exports."""
+    if instrument.market == "台股":
+        category = TAIWAN_PRODUCT_CATEGORIES.get(instrument.symbol)
+        if category:
+            return category
+        if instrument.industry:
+            return f"主力產品待建檔（{instrument.industry}）"
+        return "主力產品待建檔"
+    if instrument.market == "幣安現貨":
+        return "加密資產／USDT 現貨"
+    return instrument.industry or "主力產品待建檔"
 
 
 def fetch_taifex_stock_futures() -> dict[str, str]:
@@ -724,6 +780,68 @@ def momentum_confirmation(
     }
 
 
+def td_trend_position(features: pd.DataFrame | None, position: int) -> str:
+    """Classify the TD bar's close relative to the EMA 50/100 ribbon."""
+    if features is None or position >= len(features):
+        return "unavailable"
+    row = features.iloc[position]
+    close = float(row["close"])
+    lower = float(row["trend_lower_edge"])
+    upper = float(row["trend_upper_edge"])
+    if not all(np.isfinite(value) for value in (close, lower, upper)):
+        return "unavailable"
+    if close > upper:
+        return "above_ribbon"
+    if close < lower:
+        return "below_ribbon"
+    return "inside_ribbon"
+
+
+def weekly_open_vs_white(
+    frame: pd.DataFrame,
+    features: pd.DataFrame | None,
+    position: int,
+    session: MarketSession,
+) -> dict[str, object]:
+    """Compare the signal week's first completed open with its white line.
+
+    The comparison is made at the first available bar of the signal's local
+    calendar week.  Holidays therefore use the first actual session, not a
+    synthetic Monday opening price.
+    """
+    unavailable: dict[str, object] = {
+        "weekly_open_vs_white": "unavailable",
+        "week_open_price": None,
+        "week_open_white": None,
+    }
+    if features is None or position >= len(frame) or position >= len(features) or "Open" not in frame.columns:
+        return unavailable
+    timestamp = pd.Timestamp(frame.index[position])
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(session.timezone)
+    local_timestamp = timestamp.tz_convert(session.timezone)
+    week_start = local_timestamp.date() - timedelta(days=local_timestamp.weekday())
+    week_position = position
+    for candidate in range(position, -1, -1):
+        candidate_time = pd.Timestamp(frame.index[candidate])
+        if candidate_time.tzinfo is None:
+            candidate_time = candidate_time.tz_localize(session.timezone)
+        if candidate_time.tz_convert(session.timezone).date() < week_start:
+            break
+        week_position = candidate
+    week_open = float(pd.to_numeric(frame["Open"].iloc[week_position], errors="coerce"))
+    white = float(features["white_kernel"].iloc[week_position])
+    if not all(np.isfinite(value) for value in (week_open, white)):
+        return unavailable
+    tolerance = max(abs(white) * 0.0005, 0.01)
+    state = "above_white" if week_open > white + tolerance else "below_white" if week_open < white - tolerance else "at_white"
+    return {
+        "weekly_open_vs_white": state,
+        "week_open_price": round(week_open, 8),
+        "week_open_white": round(white, 8),
+    }
+
+
 def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSession) -> str:
     timestamp = pd.Timestamp(index_value)
     if timestamp.tzinfo is None:
@@ -817,17 +935,22 @@ def collect_signals(
             event for event in events
             if len(frame) - 1 - int(event["position"]) < recent_bars
         ]
-        features = ai_momentum_features(frame) if timeframe.key in MOMENTUM_TIMEFRAME_KEYS else None
+        # All card timeframes need the ribbon position and weekly-open/white
+        # comparison.  The stricter bearish-Momentum confirmation remains a
+        # 15-minute / one-hour filter only.
+        features = ai_momentum_features(frame)
         for event in recent_events:
             position = int(event["position"])
             age_bars = len(frame) - 1 - position
             sparkline, sparkline_signal_index = signal_sparkline(frame, position)
             signals.append(
                 {
-                "symbol": instrument.symbol,
-                "name": instrument.name,
-                "industry": instrument.industry,
+                    "symbol": instrument.symbol,
+                    "name": instrument.name,
+                    "industry": instrument.industry,
+                    "product_category": product_category_for(instrument),
                     "exchange": instrument.exchange,
+                    "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
                     "market": instrument.market,
                     "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
                     "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
@@ -841,6 +964,8 @@ def collect_signals(
                     "buy_countdown": event["buy_countdown"],
                     "sell_countdown": event["sell_countdown"],
                     "momentum": momentum_confirmation(features, position, str(event["side"])),
+                    "td_trend_position": td_trend_position(features, position),
+                    **weekly_open_vs_white(frame, features, position, instrument.session),
                     "sparkline": sparkline,
                     "sparkline_signal_index": sparkline_signal_index,
                 }
@@ -862,7 +987,9 @@ def collect_signals(
                         "symbol": instrument.symbol,
                         "name": instrument.name,
                         "industry": instrument.industry,
+                        "product_category": product_category_for(instrument),
                         "exchange": instrument.exchange,
+                        "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
                         "market": instrument.market,
                         "side": "buy",
                         "signal_type": "long_reclaim",
@@ -907,14 +1034,35 @@ def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: li
     )
     if errors:
         source += " 本次部分來源未更新：" + "；".join(errors)
+    frame_list = list(frames)
     payload = {
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "market_status": "open" if is_regular_session(now) else "closed",
         "source": source,
-        "timeframes": list(frames),
+        "timeframes": frame_list,
     }
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # The static file is a ready-to-upload TradingView watchlist for the
+    # default buy-side view.  The browser can additionally export any active
+    # filter combination without waiting for another Actions run.
+    tradingview_symbols: set[str] = set()
+    for timeframe in frame_list:
+        signals = timeframe.get("signals", []) if isinstance(timeframe, dict) else []
+        for signal in signals if isinstance(signals, list) else []:
+            if not isinstance(signal, dict) or signal.get("side") != "buy":
+                continue
+            symbol = str(signal.get("tradingview_symbol") or "").strip()
+            if not symbol:
+                exchange = str(signal.get("exchange") or "").strip().upper()
+                ticker = str(signal.get("symbol") or "").strip().upper()
+                symbol = f"{exchange}:{ticker}" if exchange and ticker else ""
+            if symbol:
+                tradingview_symbols.add(symbol)
+    TRADINGVIEW_EXPORT_FILE.write_text(
+        "\n".join(sorted(tradingview_symbols)) + ("\n" if tradingview_symbols else ""),
+        encoding="utf-8",
+    )
 
 
 def main() -> None:

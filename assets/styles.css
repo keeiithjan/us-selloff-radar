@@ -188,6 +188,8 @@ body {
 .sparkline-last { fill: #b8cfda; stroke: var(--surface); stroke-width: 1.25; vector-effect: non-scaling-stroke; animation: last-price-pulse 1.45s ease-in-out infinite; }
 .sparkline-signal { fill: var(--electric); stroke: var(--surface); stroke-width: 1.35; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px var(--electric)); animation: signal-point-pulse 1.3s ease-in-out infinite; }
 .sparkline-death { fill: #ff9d3c; stroke: var(--surface); stroke-width: 1.35; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px #ff9d3c); animation: death-point-pulse 1.3s ease-in-out infinite; }
+.sparkline-marker-label { fill: #7bdcff; font-family: "DM Mono", monospace; font-size: 7px; font-weight: 800; paint-order: stroke; stroke: rgb(5 14 25 / 90%); stroke-width: 2px; stroke-linejoin: round; }
+.sparkline-marker-label.death { fill: #ffad65; }
 @keyframes signal-point-pulse { 50% { opacity: .48; r: 4.4px; } }
 @keyframes death-point-pulse { 50% { opacity: .48; r: 4.4px; } }
 @keyframes last-price-pulse { 50% { opacity: .38; filter: drop-shadow(0 0 4px currentColor); } }
@@ -370,7 +372,8 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-family: "Noto Serif TC", "Songti T
 .lede, .muted, footer, .rules p { color: var(--muted); line-height: 1.68; }
 
 .refresh,
-.tv-link {
+.tv-link,
+.download-list {
   border: 1px solid rgb(32 224 191 / 78%);
   border-radius: 6px;
   background: linear-gradient(135deg, #1cc9aa, #207ff0);
@@ -385,10 +388,11 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-family: "Noto Serif TC", "Songti T
 
 .refresh { padding: 12px 16px; white-space: nowrap; animation: refresh-glow 2.8s ease-in-out infinite; }
 @keyframes refresh-glow { 50% { box-shadow: 0 0 30px rgb(54 185 255 / 46%); } }
-.refresh:hover, .tv-link:hover { border-color: #b5fff0; background: linear-gradient(135deg, #41efd0, #51a4ff); box-shadow: 0 0 32px rgb(54 185 255 / 45%); }
-.refresh:active, .tv-link:active { transform: translateY(1px); }
+.refresh:hover, .tv-link:hover, .download-list:hover { border-color: #b5fff0; background: linear-gradient(135deg, #41efd0, #51a4ff); box-shadow: 0 0 32px rgb(54 185 255 / 45%); }
+.refresh:active, .tv-link:active, .download-list:active { transform: translateY(1px); }
 .refresh:focus-visible,
 .tv-link:focus-visible,
+.download-list:focus-visible,
 .sequential-controls select:focus-visible { outline: 3px solid #b9d9c8; outline-offset: 2px; }
 
 .status-grid {
@@ -495,6 +499,9 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-family: "Noto Serif TC", "Songti T
   padding: 0 31px 0 11px;
 }
 
+.download-list { align-self: end; min-height: 40px; padding: 0 13px; white-space: nowrap; }
+.tradingview-export-note { margin: 10px 0 0; color: #a7c5d5; font-size: .76rem; line-height: 1.5; }
+
 .sequential-frames {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -519,6 +526,12 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-family: "Noto Serif TC", "Songti T
 .signal-age { margin: 7px 0 0; color: var(--accent); font-size: .72rem; font-weight: 800; }
 .signal-details { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .signal-details span { padding: 3px 6px; border: 1px solid rgb(117 169 191 / 22%); border-radius: 4px; background: rgb(117 169 191 / 7%); }
+.signal-details .td-trend-position.above_ribbon,
+.signal-details .weekly-open.above_white { border-color: rgb(32 224 191 / 38%); background: var(--accent-soft); color: #7bffe5; }
+.signal-details .td-trend-position.inside_ribbon,
+.signal-details .weekly-open.at_white { border-color: rgb(245 193 78 / 42%); background: rgb(245 193 78 / 10%); color: #ffe09a; }
+.signal-details .td-trend-position.below_ribbon,
+.signal-details .weekly-open.below_white { border-color: rgb(255 95 119 / 38%); background: var(--danger-soft); color: #ffadb9; }
 .today-change { padding: 3px 6px; border: 1px solid rgb(117 169 191 / 22%); border-radius: 4px; background: rgb(117 169 191 / 7%); font-size: .68rem; font-weight: 800; white-space: nowrap; }
 .today-change.up { border-color: rgb(32 224 191 / 34%); background: var(--accent-soft); color: #7bffe5; }
 .today-change.down { border-color: rgb(255 95 119 / 34%); background: var(--danger-soft); color: #ffadb9; }
@@ -558,7 +571,7 @@ footer p { margin-bottom: 8px; }
   .premarket-movers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .taiex-technical-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-ticker-heading { flex-wrap: wrap; }
-  .status-grid, .sequential-frames, .trend-reclaim-frames { grid-template-columns: 1fr; }
+  .sequential-frames, .trend-reclaim-frames { grid-template-columns: 1fr; }
   .metric { min-height: auto; }
 }
 
@@ -571,6 +584,7 @@ footer p { margin-bottom: 8px; }
   .alert-top { align-items: flex-start; }
   .sequential-controls label { width: 100%; }
   .sequential-controls select { width: 100%; }
+  .download-list { width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

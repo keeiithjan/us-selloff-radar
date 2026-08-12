@@ -1,4 +1,4 @@
-name: Scan US selloffs and deploy
+name: Refresh KJ Radar TD data and deploy
 
 on:
   workflow_dispatch:
@@ -46,9 +46,6 @@ jobs:
 
       - name: Install scanner dependencies
         run: python -m pip install -r requirements.txt
-
-      - name: Refresh alert data
-        run: python scanner.py
 
       - name: Refresh market pulse data
         id: market_pulse

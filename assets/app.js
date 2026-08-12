@@ -1,11 +1,4 @@
 const elements = {
-  status: document.querySelector("#market-status"),
-  count: document.querySelector("#alert-count"),
-  updated: document.querySelector("#updated-at"),
-  coverage: document.querySelector("#scan-coverage"),
-  alerts: document.querySelector("#alerts"),
-  empty: document.querySelector("#empty"),
-  source: document.querySelector("#source-note"),
   refresh: document.querySelector("#refresh"),
   sequentialFrames: document.querySelector("#sequential-frames"),
   sequentialUpdated: document.querySelector("#sequential-updated"),
@@ -14,6 +7,8 @@ const elements = {
   sequentialSort: document.querySelector("#sequential-sort"),
   sequentialSide: document.querySelector("#sequential-side"),
   sequentialMomentum: document.querySelector("#sequential-momentum"),
+  downloadTradingViewList: document.querySelector("#download-tradingview-list"),
+  tradingViewExportNote: document.querySelector("#tradingview-export-note"),
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
@@ -30,11 +25,8 @@ let marketUpdatedAt = null;
 let marketAgeTimer = null;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const motionState = {
-  alerts: new Map(),
   futures: new Map(),
   movers: new Map(),
-  alertCount: null,
-  hasAlerts: false,
   hasMarket: false,
 };
 
@@ -181,8 +173,9 @@ function makeTradingViewLink(item, interval) {
   return link;
 }
 
-function industryText(industry) {
-  return `產業｜${industry || "未分類"}`;
+function industryText(item) {
+  const product = typeof item === "string" ? item : item?.product_category || item?.industry;
+  return `主力產品｜${product || "待建檔"}`;
 }
 
 function displayMarket(market) {
@@ -198,75 +191,14 @@ function makeTodayChange(value) {
   return chip;
 }
 
-function makeAlertCard(alert, motion = {}) {
-  const card = document.createElement("article");
-  card.className = `alert-card${motion.enter ? " is-fresh" : ""}${motion.isNew ? " is-new" : ""}${motion.isUpdated ? " is-updated" : ""}`;
-
-  const top = document.createElement("div");
-  top.className = "alert-top";
-  const name = document.createElement("div");
-  const ticker = document.createElement("h3");
-  ticker.className = "ticker";
-  ticker.textContent = alert.symbol;
-  const exchange = document.createElement("p");
-  exchange.className = "exchange";
-  exchange.textContent = [alert.exchange, industryText(alert.industry), alert.bar_time_et].filter(Boolean).join(" · ");
-  name.append(ticker, exchange);
-  const drop = document.createElement("div");
-  drop.className = "drop matrix-number";
-  drop.textContent = `${Number(alert.price_change_pct).toFixed(2)}%`;
-  if (motion.isUpdated || motion.enter) {
-    const start = motion.isUpdated
-      ? motion.previous.price_change_pct
-      : initialNumberStart(alert.price_change_pct, "down", true);
-    animateNumber(drop, start, alert.price_change_pct, (value) => `${value.toFixed(2)}%`);
-  }
-  top.append(name, drop);
-
-  const stats = document.createElement("div");
-  stats.className = "stats";
-  stats.append(
-    makeStat("最新價格", formatCurrency(alert.last_price)),
-    makeStat("5 分鐘量比", `${Number(alert.volume_multiple).toFixed(2)} 倍`),
-    makeStat("近 4 日平均日成交額", formatCompactCurrency(alert.average_daily_dollar_volume))
-  );
-  card.append(top, stats, makeTradingViewLink(alert, "5"));
-  return card;
-}
-
-function renderSelloff(payload) {
-  const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
-  const open = payload.market_status === "open";
-  elements.status.textContent = open ? "美股一般盤中" : "美股一般盤外";
-  elements.status.style.color = open ? "var(--accent)" : "var(--muted)";
-  const priorCount = motionState.alertCount;
-  elements.count.classList.add("matrix-number");
-  const countStart = motionState.hasAlerts && Number.isFinite(priorCount) ? priorCount : 0;
-  animateNumber(elements.count, countStart, alerts.length, (value) => String(Math.round(value)));
-  elements.updated.textContent = payload.updated_at_utc ? formatTaipei(payload.updated_at_utc) : "—";
-  elements.coverage.textContent = `已掃描 ${String(payload.scanned_symbols || 0)} 檔`;
-  elements.source.textContent = payload.source || "";
-  elements.alerts.replaceChildren(
-    ...alerts.map((alert) => {
-      const previous = motionState.alerts.get(alert.symbol);
-      const motion = { ...quoteMotion(previous, alert, !motionState.hasAlerts), previous };
-      return makeAlertCard(alert, motion);
-    })
-  );
-  elements.empty.hidden = alerts.length !== 0;
-  motionState.alerts = quoteSnapshot(alerts, "symbol");
-  motionState.alertCount = alerts.length;
-  motionState.hasAlerts = true;
-}
-
 function makeSparkline(values, direction, animate = false, options = {}) {
   const points = (Array.isArray(values) ? values : [])
     .map(Number)
     .filter((value) => Number.isFinite(value));
   if (points.length < 2) return null;
 
-  const width = 128;
-  const height = 34;
+  const width = 176;
+  const height = 42;
   const padding = 2;
   const minimum = Math.min(...points);
   const maximum = Math.max(...points);
@@ -311,6 +243,16 @@ function makeSparkline(values, direction, animate = false, options = {}) {
     marker.setAttribute("cy", markerY);
     marker.setAttribute("r", "3.2");
     svg.append(marker);
+    const markerLabel = String(markerSpec?.label || "").trim();
+    if (markerLabel) {
+      const label = document.createElementNS(namespace, "text");
+      label.setAttribute("class", `sparkline-marker-label ${markerSpec?.kind === "death" ? "death" : "signal"}`);
+      label.setAttribute("x", markerX);
+      label.setAttribute("y", String(Math.max(9, Number(markerY) - 7)));
+      label.setAttribute("text-anchor", "middle");
+      label.textContent = markerLabel;
+      svg.append(label);
+    }
   }
   wrap.append(svg);
   return wrap;
@@ -412,7 +354,7 @@ function makePremarketCard(mover, motion = {}) {
   ticker.textContent = mover.symbol;
   const industry = document.createElement("p");
   industry.className = "exchange";
-  industry.textContent = [mover.exchange, industryText(mover.industry), mover.bar_time_et].filter(Boolean).join(" · ");
+  industry.textContent = [mover.exchange, industryText(mover), mover.bar_time_et].filter(Boolean).join(" · ");
   name.append(ticker, industry);
   const change = document.createElement("strong");
   change.className = "premarket-change matrix-number";
@@ -701,6 +643,28 @@ function renderMarketPulse(payload) {
   motionState.hasMarket = true;
 }
 
+function tdTrendPositionText(position) {
+  return {
+    above_ribbon: "TD 產生 K 棒：趨勢帶上方",
+    inside_ribbon: "TD 產生 K 棒：趨勢帶內",
+    below_ribbon: "TD 產生 K 棒：趨勢帶下方",
+  }[position] || "TD／趨勢帶位置：待下次掃描";
+}
+
+function weeklyOpenText(signal) {
+  const state = signal.weekly_open_vs_white;
+  const label = {
+    above_white: "本週開盤：高於白線",
+    at_white: "本週開盤：貼近白線",
+    below_white: "本週開盤：低於白線",
+  }[state];
+  if (!label) return "本週開盤／白線：待下次掃描";
+  const weekOpen = Number(signal.week_open_price);
+  const white = Number(signal.week_open_white);
+  if (!Number.isFinite(weekOpen) || !Number.isFinite(white)) return label;
+  return `${label}（${weekOpen.toFixed(2)} vs ${white.toFixed(2)}）`;
+}
+
 function makeSequentialSignal(signal, interval) {
   const card = document.createElement("article");
   card.className = `sequential-signal ${signal.side || "mixed"}`;
@@ -728,10 +692,16 @@ function makeSequentialSignal(signal, interval) {
   const details = document.createElement("div");
   details.className = "signal-details";
   const industry = document.createElement("span");
-  industry.textContent = industryText(signal.industry);
+  industry.textContent = industryText(signal);
   const occurred = document.createElement("span");
   occurred.textContent = `訊號產生：${signal.bar_time_et || "資料不足"}`;
-  details.append(industry, occurred);
+  const trendPosition = document.createElement("span");
+  trendPosition.className = `td-trend-position ${signal.td_trend_position || "unknown"}`;
+  trendPosition.textContent = tdTrendPositionText(signal.td_trend_position);
+  const weeklyOpen = document.createElement("span");
+  weeklyOpen.className = `weekly-open ${signal.weekly_open_vs_white || "unknown"}`;
+  weeklyOpen.textContent = weeklyOpenText(signal);
+  details.append(industry, occurred, trendPosition, weeklyOpen);
 
   const labels = document.createElement("div");
   labels.className = "signal-labels";
@@ -748,8 +718,12 @@ function makeSequentialSignal(signal, interval) {
     return values.at(-1) > values[0] ? "up" : values.at(-1) < values[0] ? "down" : "flat";
   })();
   const sparkline = makeSparkline(signal.sparkline, chartDirection, true, {
-    title: "最近 30 根已完成 K 棒走勢；圓點為 TD 訊號",
-    markerIndex: signal.sparkline_signal_index,
+    title: "最近 30 根已完成 K 棒走勢；標記為 TD 訊號位置",
+    markers: [{
+      index: signal.sparkline_signal_index,
+      kind: "signal",
+      label: `TD ${tdMarkerInfo(signal.labels).text || ""}`.trim(),
+    }],
   });
   if (sparkline) sparkline.classList.add("signal-sparkline");
   const momentum = signal.momentum || {};
@@ -821,7 +795,7 @@ function makeTrendReclaimSignal(signal, interval) {
   const details = document.createElement("div");
   details.className = "signal-details";
   const industry = document.createElement("span");
-  industry.textContent = industryText(signal.industry);
+  industry.textContent = industryText(signal);
   const occurred = document.createElement("span");
   occurred.textContent = `回站時間：${signal.bar_time_et || "資料不足"}`;
   details.append(industry, occurred);
@@ -907,6 +881,48 @@ function filteredSignals(frame) {
     });
 }
 
+function tradingViewImportSymbol(signal) {
+  if (signal.tradingview_symbol) return String(signal.tradingview_symbol).trim();
+  const symbol = String(signal.symbol || "").trim().toUpperCase();
+  const exchange = String(signal.exchange || "").trim().toUpperCase();
+  if (!symbol || !exchange) return "";
+  return `${exchange}:${symbol}`;
+}
+
+function selectedSignalsForExport() {
+  const frames = Array.isArray(sequentialPayload?.timeframes) ? sequentialPayload.timeframes : [];
+  const unique = new Map();
+  for (const frame of frames) {
+    for (const signal of filteredSignals(frame)) {
+      const symbol = tradingViewImportSymbol(signal);
+      if (symbol && !unique.has(symbol)) unique.set(symbol, signal);
+    }
+  }
+  return [...unique.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([symbol]) => symbol);
+}
+
+function downloadTradingViewList() {
+  const symbols = selectedSignalsForExport();
+  if (symbols.length === 0) {
+    elements.tradingViewExportNote.textContent = "目前篩選結果沒有可匯出的 TD 標的。";
+    return;
+  }
+  const side = elements.sequentialSide.value === "buy" ? "buy" : elements.sequentialSide.value === "sell" ? "sell" : "all";
+  const content = `${symbols.join("\n")}\n`;
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `KJ-Radar-TD-${side}-${new Date().toISOString().slice(0, 10)}.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  elements.tradingViewExportNote.textContent = `已產生 ${symbols.length} 個不重複代號；可直接在 TradingView 匯入清單。`;
+}
+
 function makeTimeframe(frame) {
   const panel = document.createElement("section");
   panel.className = "timeframe";
@@ -955,6 +971,10 @@ function renderSequential(payload) {
     ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
     : "等待首次資料更新";
   elements.sequentialSource.textContent = payload.source || "";
+  const exportCount = selectedSignalsForExport().length;
+  elements.tradingViewExportNote.textContent = exportCount
+    ? `目前篩選結果可匯出 ${exportCount} 個不重複代號；同一標的跨週期僅保留一列。`
+    : "目前篩選結果沒有可匯出的 TD 標的。";
 }
 
 async function loadJson(path) {
@@ -967,17 +987,14 @@ async function refresh() {
   elements.refresh.disabled = true;
   elements.refresh.textContent = "更新中…";
   try {
-    const [alerts, sequential, market] = await Promise.all([
-      loadJson("data/alerts.json"),
+    const [sequential, market] = await Promise.all([
       loadJson("data/sequential.json"),
       loadJson("data/market.json"),
     ]);
-    renderSelloff(alerts);
     renderSequential(sequential);
     renderMarketPulse(market);
   } catch (error) {
-    elements.status.textContent = "資料讀取失敗";
-    elements.source.textContent = "請稍後重試；若持續發生，請查看 GitHub Actions 的最近執行結果。";
+    elements.sequentialSource.textContent = "資料讀取失敗；請稍後重試，或查看 GitHub Actions 的最近執行結果。";
     console.error(error);
   } finally {
     elements.refresh.disabled = false;
@@ -998,5 +1015,6 @@ elements.sequentialSide.addEventListener("change", () => {
 elements.sequentialMomentum.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
+elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);
 refresh();
 setInterval(refresh, 60_000);

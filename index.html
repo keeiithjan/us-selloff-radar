@@ -16,7 +16,7 @@
         <div class="hero-copy">
           <p class="eyebrow">KJ // MARKET INTELLIGENCE</p>
           <h1>KJ Radar System</h1>
-          <p class="lede">30 分鐘急跌爆量監控，加上 Sequential 7／8／9／13 的 15 分鐘、1 小時與日線訊號；可直接開啟 TradingView。</p>
+          <p class="lede">TD Sequential 9／13 與趨勢帶監測，涵蓋 15 分鐘、1 小時與日線訊號；可一鍵轉出 TradingView 上傳清單。</p>
           <p class="hero-status"><span class="system-dot" aria-hidden="true"></span> SYSTEM ONLINE <b>LIVE FEED · 60S CHECK</b></p>
         </div>
         <button id="refresh" class="refresh" type="button">更新畫面</button>
@@ -69,47 +69,15 @@
         <p id="premarket-empty" class="premarket-empty" hidden></p>
       </section>
 
-      <section class="status-grid" aria-label="掃描狀態">
-        <article class="metric">
-          <span>市場狀態</span>
-          <strong id="market-status">載入中</strong>
-        </article>
-        <article class="metric">
-          <span>急跌警示</span>
-          <strong id="alert-count">—</strong>
-        </article>
-        <article class="metric">
-          <span>最後更新（台北時間）</span>
-          <strong id="updated-at">—</strong>
-        </article>
-      </section>
-
-      <section class="rules">
-        <h2>急跌條件</h2>
-        <p>30 分鐘跌幅 ≤ -3%，最新 5 分鐘成交量 ≥ 前 20 根中位數的 3 倍，且最低價格 USD 5、近 4 個完整交易日平均成交額 ≥ USD 20M。</p>
-      </section>
-
-      <section class="monitor">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">CURRENT CANDIDATES</p>
-            <h2>急跌爆量標的</h2>
-          </div>
-          <p id="scan-coverage" class="muted"></p>
-        </div>
-        <div id="alerts" class="alerts" aria-live="polite"></div>
-        <p id="empty" class="empty" hidden>目前沒有符合急跌爆量條件的標的。</p>
-      </section>
-
       <section class="sequential-monitor" aria-labelledby="sequential-title">
         <div class="section-heading">
           <div>
             <p class="eyebrow">MULTI-TIMEFRAME SEQUENTIAL</p>
-            <h2 id="sequential-title">Sequential 7／8／9／13 監測</h2>
+            <h2 id="sequential-title">TD Sequential 9／13 監測</h2>
           </div>
           <p id="sequential-updated" class="muted"></p>
         </div>
-          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號保留最近 5 根已完成 K 棒（含最新一根），超過即自動排除。每張字卡顯示產業類型、訊號產生時間與最近 30 根 K 棒走勢；圓點即 TD 訊號位置。空方動能確認僅適用賣方 TD，並回看 30 根 K 的黃線與趨勢帶位置。涵蓋美股、台股與幣安高流動性 USDT 現貨。</p>
+          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號保留最近 5 根已完成 K 棒（含最新一根）。預設為買方標的；可切換賣方。字卡標示主力產品、TD 產生 K 棒相對於趨勢帶的位置，以及該週開盤是否高於白線。</p>
         <div class="sequential-controls" aria-label="Sequential 篩選器">
           <label for="sequential-market">市場
             <select id="sequential-market">
@@ -127,9 +95,9 @@
           </label>
           <label for="sequential-side">方向
             <select id="sequential-side">
-              <option value="all">買方與賣方</option>
-              <option value="buy">僅買方</option>
+              <option value="buy" selected>僅買方</option>
               <option value="sell">僅賣方</option>
+              <option value="all">買方與賣方</option>
             </select>
           </label>
           <label for="sequential-momentum">動能確認
@@ -138,7 +106,9 @@
               <option value="confirmed">僅空方動能確認</option>
             </select>
           </label>
+          <button id="download-tradingview-list" class="download-list" type="button">下載 TradingView 上傳清單 .TXT</button>
         </div>
+        <p id="tradingview-export-note" class="tradingview-export-note">匯出依目前篩選條件彙整；同一標的跨週期訊號僅保留一列。</p>
         <div class="trend-reclaim-monitor" aria-labelledby="trend-reclaim-title">
           <div class="section-heading">
             <div>
