@@ -96,7 +96,32 @@ TAIWAN_PRODUCT_CATEGORIES = {
     "2395": "車用電子／網通", "3552": "ADAS／車用電子", "1536": "工具機／自動化",
     "2049": "上銀精密傳動／自動化", "1590": "精密機械／自動化", "4137": "生技新藥",
     "6472": "生技醫療通路", "4743": "醫療耗材",
+    # Flexible materials and specialty CCL
+    "8039": "軟性銅箔基板（FCCL）／FPC 材料",
 }
+
+# When a Taiwan name is not in the carefully maintained map above, its product
+# label is inferred from the public company business description returned by
+# Yahoo Finance.  These rules intentionally use concrete product vocabulary;
+# no match falls back to the exchange's industry instead of inventing a theme.
+TAIWAN_BUSINESS_PRODUCT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("flexible copper-clad", "fccl", "coverlay", "bonding sheet", "fpc material"), "軟性銅箔基板（FCCL）／FPC 材料"),
+    (("abf", "ic carrier", "fcbga", "fc-csp", "package substrate"), "IC 載板／ABF 載板"),
+    (("co-packaged optics", "silicon photonic", "optical transceiver", "optical module"), "CPO／矽光子／高速光通訊"),
+    (("printed circuit board", "pcb", "hdi", "rigid-flex"), "PCB／HDI／軟硬板"),
+    (("wafer foundry", "wafer fabrication", "semiconductor manufacturing"), "半導體晶圓製造"),
+    (("integrated circuit design", "ic design", "system-on-chip", "soc"), "IC 設計／系統單晶片"),
+    (("semiconductor testing", "burn-in", "semiconductor packaging"), "半導體封裝測試"),
+    (("server", "data center", "motherboard"), "伺服器／資料中心硬體"),
+    (("power supply", "power conversion", "thermal solution", "cooling"), "電源供應／散熱"),
+    (("network switch", "network equipment", "wireless communication"), "網通設備／交換器"),
+    (("memory module", "dram", "flash memory", "nand"), "記憶體／記憶體模組"),
+    (("display panel", "lcd panel", "oled panel"), "面板／顯示器"),
+    (("camera lens", "optical lens", "image sensor"), "光學鏡頭／影像感測"),
+    (("passive component", "capacitor", "inductor", "resistor"), "被動元件"),
+    (("electric vehicle", "automotive electronics", "automotive component"), "車用電子／電動車零組件"),
+    (("medical device", "medical equipment", "pharmaceutical", "biotechnology"), "醫療器材／生技製藥"),
+)
 
 
 @dataclass(frozen=True)
@@ -273,8 +298,15 @@ def fetch_taiwan_industries() -> dict[str, str]:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            code = str(row.get("公司代號") or row.get("證券代號") or "").strip().upper()
-            raw_industry = str(row.get("產業別") or "").strip()
+            code = str(
+                row.get("公司代號")
+                or row.get("證券代號")
+                or row.get("SecuritiesCompanyCode")
+                or ""
+            ).strip().upper()
+            raw_industry = str(
+                row.get("產業別") or row.get("SecuritiesIndustryCode") or ""
+            ).strip()
             industry = TAIWAN_INDUSTRY_NAMES.get(raw_industry, raw_industry)
             if re.fullmatch(r"\d{1,2}", raw_industry) and raw_industry not in TAIWAN_INDUSTRY_NAMES:
                 industry = "未分類"
@@ -283,12 +315,37 @@ def fetch_taiwan_industries() -> dict[str, str]:
     return industries
 
 
-def product_category_for(instrument: Instrument) -> str:
+def _classify_taiwan_business_description(description: object) -> str | None:
+    """Map a public business description to a concrete product class."""
+    text = str(description or "").lower()
+    if not text:
+        return None
+    for keywords, category in TAIWAN_BUSINESS_PRODUCT_RULES:
+        if any(keyword in text for keyword in keywords):
+            return category
+    return None
+
+
+def product_category_for(
+    instrument: Instrument, public_profile_cache: dict[str, str | None] | None = None
+) -> str:
     """Return a concise, product-led label for UI cards and exports."""
     if instrument.market == "台股":
         category = TAIWAN_PRODUCT_CATEGORIES.get(instrument.symbol)
         if category:
             return category
+        cache = public_profile_cache if public_profile_cache is not None else {}
+        if instrument.ticker not in cache:
+            try:
+                profile = yf.Ticker(instrument.ticker).get_info()
+                cache[instrument.ticker] = _classify_taiwan_business_description(
+                    profile.get("longBusinessSummary") if isinstance(profile, dict) else None
+                )
+            except Exception as exc:
+                logging.info("%s 公司業務描述讀取失敗：%s", instrument.symbol, exc)
+                cache[instrument.ticker] = None
+        if cache[instrument.ticker]:
+            return str(cache[instrument.ticker])
         if instrument.industry:
             return f"產業分類：{instrument.industry}"
         return "產業分類：交易所未提供"
@@ -965,6 +1022,7 @@ def collect_signals(
     pepperstone_instruments: list[Instrument],
     timeframe: Timeframe,
     now: datetime,
+    public_profile_cache: dict[str, str | None] | None = None,
 ) -> dict[str, object]:
     records = download_yahoo_records(us_instruments, timeframe)
     records.extend(download_yahoo_records(pepperstone_instruments, timeframe))
@@ -990,6 +1048,14 @@ def collect_signals(
             event for event in events
             if len(frame) - 1 - int(event["position"]) < recent_bars
         ]
+        # Resolve public company descriptions only for names that actually
+        # create a card.  That keeps the 200+ Taiwan universe scan fast while
+        # making the card classification materially more specific.
+        card_product_category = (
+            product_category_for(instrument, public_profile_cache)
+            if recent_events
+            else None
+        )
         # All card timeframes need the ribbon position and weekly-open/white
         # comparison.  The stricter bearish-Momentum confirmation remains a
         # 15-minute / one-hour filter only.
@@ -1003,7 +1069,7 @@ def collect_signals(
                     "symbol": instrument.symbol,
                     "name": instrument.name,
                     "industry": instrument.industry,
-                    "product_category": product_category_for(instrument),
+                    "product_category": card_product_category,
                     "exchange": instrument.exchange,
                     "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
                     "market": instrument.market,
@@ -1033,6 +1099,8 @@ def collect_signals(
                 if len(frame) - 1 - int(event["position"]) < recent_bars
             ]
             for event in recent_reclaims:
+                if card_product_category is None:
+                    card_product_category = product_category_for(instrument, public_profile_cache)
                 position = int(event["position"])
                 death_position = int(event["death_cross_position"])
                 sparkline, sparkline_signal_index = signal_sparkline(frame, position)
@@ -1042,7 +1110,7 @@ def collect_signals(
                         "symbol": instrument.symbol,
                         "name": instrument.name,
                         "industry": instrument.industry,
-                        "product_category": product_category_for(instrument),
+                        "product_category": card_product_category,
                         "exchange": instrument.exchange,
                         "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
                         "market": instrument.market,
@@ -1143,6 +1211,7 @@ def main() -> None:
         binance_instruments = []
         errors.append("幣安標的清單讀取失敗")
     pepperstone_instruments = fetch_pepperstone_instruments()
+    public_profile_cache: dict[str, str | None] = {}
 
     frames = [
         collect_signals(
@@ -1153,6 +1222,7 @@ def main() -> None:
             pepperstone_instruments,
             timeframe,
             now,
+            public_profile_cache,
         )
         for timeframe in TIMEFRAMES
     ]
