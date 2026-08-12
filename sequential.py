@@ -1041,14 +1041,12 @@ def collect_signals(
         _, events = sequential_history(frame)
         latest_completed.append((pd.Timestamp(frame.index[-1]), instrument.session))
         today_change_pct = latest_day_change_pct(frame, timeframe, instrument.session)
-        recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "5"))
+        recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "8"))
         if recent_bars < 1 or recent_bars > 20:
             raise ValueError("RECENT_SIGNAL_BARS 必須介於 1 到 20")
-        # `RECENT_SIGNAL_BARS=5` means that a signal remains visible through
-        # the fifth completed bar after it occurred (ages 0 through 5).  The
-        # previous strict-less-than comparison silently dropped a signal at
-        # exactly five bars ago, which made valid cards such as 8039 台虹 vanish
-        # one bar earlier than the dashboard policy states.
+        # `RECENT_SIGNAL_BARS=8` means a signal remains visible through the
+        # eighth completed bar after it occurred (ages 0 through 8).  The
+        # inclusive comparison keeps the final configured bar visible.
         recent_events = [
             event for event in events
             if len(frame) - 1 - int(event["position"]) <= recent_bars
@@ -1148,11 +1146,44 @@ def collect_signals(
         "tradingview_interval": timeframe.tradingview_interval,
         "scanned_symbols": sum(scanned_by_market.values()),
         "scanned_by_market": scanned_by_market,
-        "recent_bars": int(os.getenv("RECENT_SIGNAL_BARS", "5")),
+        "recent_bars": int(os.getenv("RECENT_SIGNAL_BARS", "8")),
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
         "trend_reclaim_signals": trend_reclaim_signals,
     }
+
+
+def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[str]:
+    """Return an import-safe, long-only watchlist in product-led order."""
+    # TradingView watchlist imports accept ticker lines only.  Product and
+    # industry therefore define the deterministic line order rather than being
+    # inserted as headings that would make the TXT fail to import.
+    market_order = {"台股": 0, "美股": 1, "幣安現貨": 2, "外匯": 3}
+    tradingview_entries: dict[str, dict] = {}
+    for timeframe in frame_list:
+        signals = timeframe.get("signals", []) if isinstance(timeframe, dict) else []
+        for signal in signals if isinstance(signals, list) else []:
+            if not isinstance(signal, dict) or signal.get("side") != "buy":
+                continue
+            symbol = str(signal.get("tradingview_symbol") or "").strip()
+            if not symbol:
+                exchange = str(signal.get("exchange") or "").strip().upper()
+                ticker = str(signal.get("symbol") or "").strip().upper()
+                symbol = f"{exchange}:{ticker}" if exchange and ticker else ""
+            if not symbol:
+                continue
+            previous = tradingview_entries.get(symbol)
+            if previous is None or str(signal.get("occurred_at_utc") or "") > str(previous.get("occurred_at_utc") or ""):
+                tradingview_entries[symbol] = signal
+
+    def tradingview_sort_key(item: tuple[str, dict]) -> tuple[int, str, str, str]:
+        symbol, signal = item
+        market = str(signal.get("market") or "")
+        product = str(signal.get("product_category") or signal.get("industry") or "其他")
+        industry = str(signal.get("industry") or "")
+        return (market_order.get(market, 99), product.casefold(), industry.casefold(), symbol)
+
+    return [symbol for symbol, _ in sorted(tradingview_entries.items(), key=tradingview_sort_key)]
 
 
 def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: list[str]) -> None:
@@ -1175,21 +1206,9 @@ def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: li
     # The static file is a ready-to-upload TradingView watchlist for the
     # default buy-side view.  The browser can additionally export any active
     # filter combination without waiting for another Actions run.
-    tradingview_symbols: set[str] = set()
-    for timeframe in frame_list:
-        signals = timeframe.get("signals", []) if isinstance(timeframe, dict) else []
-        for signal in signals if isinstance(signals, list) else []:
-            if not isinstance(signal, dict) or signal.get("side") != "buy":
-                continue
-            symbol = str(signal.get("tradingview_symbol") or "").strip()
-            if not symbol:
-                exchange = str(signal.get("exchange") or "").strip().upper()
-                ticker = str(signal.get("symbol") or "").strip().upper()
-                symbol = f"{exchange}:{ticker}" if exchange and ticker else ""
-            if symbol:
-                tradingview_symbols.add(symbol)
+    tradingview_symbols = tradingview_export_symbols(frame_list)
     TRADINGVIEW_EXPORT_FILE.write_text(
-        "\n".join(sorted(tradingview_symbols)) + ("\n" if tradingview_symbols else ""),
+        "\n".join(tradingview_symbols) + ("\n" if tradingview_symbols else ""),
         encoding="utf-8",
     )
 

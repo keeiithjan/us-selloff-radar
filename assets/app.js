@@ -868,7 +868,7 @@ function makeTrendReclaimTimeframe(frame) {
   const title = document.createElement("h4");
   title.textContent = frame.label || frame.key;
   const count = document.createElement("span");
-  count.textContent = `訊號後 ${Number(frame.recent_bars || 5)} 根：${signals.length} 個`;
+  count.textContent = `訊號後 ${Number(frame.recent_bars || 8)} 根：${signals.length} 個`;
   header.append(title, count);
   panel.append(header);
   if (signals.length === 0) {
@@ -915,38 +915,62 @@ function tradingViewImportSymbol(signal) {
   return `${exchange}:${symbol}`;
 }
 
+function exportSortKey(signal) {
+  const marketOrder = { "台股": 0, "美股": 1, "幣安現貨": 2, "外匯": 3 };
+  const product = String(signal.product_category || signal.industry || "其他");
+  const industry = String(signal.industry || "");
+  return [marketOrder[signal.market] ?? 99, product, industry, tradingViewImportSymbol(signal)];
+}
+
+function compareExportSignals(left, right) {
+  const leftKey = exportSortKey(left);
+  const rightKey = exportSortKey(right);
+  for (let index = 0; index < leftKey.length; index += 1) {
+    const comparison = String(leftKey[index]).localeCompare(String(rightKey[index]), "zh-Hant");
+    if (comparison !== 0) return comparison;
+  }
+  return 0;
+}
+
 function selectedSignalsForExport() {
   const frames = Array.isArray(sequentialPayload?.timeframes) ? sequentialPayload.timeframes : [];
+  const selectedMarket = elements.sequentialMarket.value;
   const unique = new Map();
   for (const frame of frames) {
-    for (const signal of filteredSignals(frame)) {
+    const signals = Array.isArray(frame.signals) ? frame.signals : [];
+    for (const signal of signals) {
+      if (signal.side !== "buy") continue;
+      if (selectedMarket !== "all" && signal.market !== selectedMarket) continue;
       const symbol = tradingViewImportSymbol(signal);
-      if (symbol && !unique.has(symbol)) unique.set(symbol, signal);
+      if (!symbol) continue;
+      const previous = unique.get(symbol);
+      const signalTime = Date.parse(signal.occurred_at_utc || 0);
+      const previousTime = Date.parse(previous?.occurred_at_utc || 0);
+      if (!previous || signalTime > previousTime) unique.set(symbol, signal);
     }
   }
-  return [...unique.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([symbol]) => symbol);
+  return [...unique.values()]
+    .sort(compareExportSignals)
+    .map((signal) => tradingViewImportSymbol(signal));
 }
 
 function downloadTradingViewList() {
   const symbols = selectedSignalsForExport();
   if (symbols.length === 0) {
-    elements.tradingViewExportNote.textContent = "目前篩選結果沒有可匯出的 TD 標的。";
+    elements.tradingViewExportNote.textContent = "目前市場沒有可匯出的做多 TD 標的。";
     return;
   }
-  const side = elements.sequentialSide.value === "buy" ? "buy" : elements.sequentialSide.value === "sell" ? "sell" : "all";
   const content = `${symbols.join("\n")}\n`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = href;
-  link.download = `KJ-Radar-TD-${side}-${new Date().toISOString().slice(0, 10)}.txt`;
+  link.download = `KJ-Radar-TD-long-${new Date().toISOString().slice(0, 10)}.txt`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(href);
-  elements.tradingViewExportNote.textContent = `已產生 ${symbols.length} 個不重複代號；可直接在 TradingView 匯入清單。`;
+  elements.tradingViewExportNote.textContent = `已產生 ${symbols.length} 個不重複做多代號；已依市場、主力產品／產業與代號排序，可直接在 TradingView 匯入。`;
 }
 
 function makeTimeframe(frame) {
@@ -958,7 +982,7 @@ function makeTimeframe(frame) {
   title.textContent = frame.label || frame.key;
   const count = document.createElement("span");
   const signals = filteredSignals(frame);
-  const recentBars = Number(frame.recent_bars || 5);
+  const recentBars = Number(frame.recent_bars || 8);
   count.textContent = `訊號後 ${recentBars} 根：${signals.length} 個`;
   header.append(title, count);
   panel.append(header);
@@ -999,8 +1023,8 @@ function renderSequential(payload) {
   elements.sequentialSource.textContent = payload.source || "";
   const exportCount = selectedSignalsForExport().length;
   elements.tradingViewExportNote.textContent = exportCount
-    ? `目前篩選結果可匯出 ${exportCount} 個不重複代號；同一標的跨週期僅保留一列。`
-    : "目前篩選結果沒有可匯出的 TD 標的。";
+    ? `目前市場可匯出 ${exportCount} 個不重複做多代號；已依市場、主力產品／產業與代號排序。`
+    : "目前市場沒有可匯出的做多 TD 標的。";
   animateScanProgress(payload);
 }
 

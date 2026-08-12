@@ -11,7 +11,7 @@ on:
     - cron: "7,37 * * * 1-5"
 
 env:
-  RECENT_SIGNAL_BARS: "5"
+  RECENT_SIGNAL_BARS: "8"
   BINANCE_TOP_USDT_PAIRS: "40"
 
 permissions:

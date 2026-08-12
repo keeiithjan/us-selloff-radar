@@ -56,7 +56,7 @@
           </div>
           <p id="sequential-updated" class="muted"></p>
         </div>
-          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號產生後保留 5 根已完成 K 棒內（第 5 根仍顯示）。預設為買方標的；可切換賣方。字卡標示主力產品、TD 產生 K 棒相對於趨勢帶的位置，以及該週開盤是否高於白線。</p>
+          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號產生後保留 8 根已完成 K 棒內（第 8 根仍顯示）。預設為買方標的；可切換賣方。字卡標示主力產品、TD 產生 K 棒相對於趨勢帶的位置，以及該週開盤是否高於白線。</p>
         <div class="sequential-controls" aria-label="Sequential 篩選器">
           <label for="sequential-market">市場
             <select id="sequential-market">
@@ -88,7 +88,7 @@
           </label>
           <button id="download-tradingview-list" class="download-list" type="button">下載 TradingView 上傳清單 .TXT</button>
         </div>
-        <p id="tradingview-export-note" class="tradingview-export-note">匯出依目前篩選條件彙整；同一標的跨週期訊號僅保留一列。</p>
+        <p id="tradingview-export-note" class="tradingview-export-note">匯出只包含做多 TD 標的；依市場、主力產品／產業與代號排序，同一標的跨週期僅保留一列。</p>
         <section id="scan-progress" class="scan-progress" aria-live="polite" aria-label="掃描進度">
           <div class="scan-progress-copy">
             <span class="scan-progress-label">DATA SCAN</span>
@@ -107,7 +107,7 @@
               <h3 id="trend-reclaim-title">做多｜趨勢帶下方死亡交叉後站回白線</h3>
             </div>
           </div>
-          <p class="sequential-note">僅做多，監測 15 分鐘與 1 小時：從死亡交叉到回站期間，收盤、AI Momentum 白線與黃線必須全程都在 TT（EMA 50／100）趨勢帶下方；任一根進入趨勢帶即作廢。其後 30 根完成 K 棒內，收盤由下往上站回白線，且白線仍在黃線下方。最近 5 根完成 K 棒內的回站訊號才會顯示。</p>
+          <p class="sequential-note">僅做多，監測 15 分鐘與 1 小時：從死亡交叉到回站期間，收盤、AI Momentum 白線與黃線必須全程都在 TT（EMA 50／100）趨勢帶下方；任一根進入趨勢帶即作廢。其後 30 根完成 K 棒內，收盤由下往上站回白線，且白線仍在黃線下方。訊號後 8 根完成 K 棒內的回站訊號才會顯示。</p>
           <div id="trend-reclaim-frames" class="trend-reclaim-frames" aria-live="polite"></div>
         </div>
         <div id="sequential-frames" class="sequential-frames" aria-live="polite"></div>

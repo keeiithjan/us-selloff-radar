@@ -12,7 +12,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## TD 字卡
 
-- 預設只顯示買方標的；賣方可由「方向」選單切換。TD 訊號產生後保留 5 根完成 K 棒，第 5 根仍會顯示。
+- 預設只顯示買方標的；賣方可由「方向」選單切換。TD 訊號產生後保留 8 根完成 K 棒，第 8 根仍會顯示。
 - 每張字卡有最近 30 根完成 K 棒走勢，`TD 9` 或 `TD 13` 會標在發生的位置。
 - 顯示 TD K 棒位於趨勢帶上方、帶內或下方。
 - 顯示 TD 當週首個可交易 K 棒的開盤價，是否高於 AI Momentum 白線。
@@ -22,9 +22,9 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## TradingView 匯入清單
 
-首頁的「下載 TradingView 上傳清單 .TXT」會依目前篩選器輸出純文字清單：每行一個 `交易所:代號`，重複標的自動合併。直接在 TradingView 的自選清單匯入 TXT 即可。
+首頁的「下載 TradingView 上傳清單 .TXT」會依目前市場輸出做多 TD 標的：每行一個 `交易所:代號`，重複標的自動合併；順序為市場、主力產品／產業、代號。為了確保可直接匯入 TradingView，不在 TXT 插入產業標題列。
 
-每次 GitHub Actions 完成掃描，亦會產生 `data/KJ-Radar-TradingView.TXT`，內容為預設買方 TD 標的。
+每次 GitHub Actions 完成掃描，亦會產生 `data/KJ-Radar-TradingView.TXT`，內容僅含做多 TD 標的，並依市場與主力產品／產業排序。
 
 ## 更新與資料來源
 
