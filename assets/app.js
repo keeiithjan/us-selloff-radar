@@ -868,7 +868,7 @@ function makeTrendReclaimTimeframe(frame) {
   const title = document.createElement("h4");
   title.textContent = frame.label || frame.key;
   const count = document.createElement("span");
-  count.textContent = `最近 ${Number(frame.recent_bars || 5)} 根：${signals.length} 個`;
+  count.textContent = `訊號後 ${Number(frame.recent_bars || 5)} 根：${signals.length} 個`;
   header.append(title, count);
   panel.append(header);
   if (signals.length === 0) {
@@ -959,7 +959,7 @@ function makeTimeframe(frame) {
   const count = document.createElement("span");
   const signals = filteredSignals(frame);
   const recentBars = Number(frame.recent_bars || 5);
-  count.textContent = `最近 ${recentBars} 根：${signals.length} 個`;
+  count.textContent = `訊號後 ${recentBars} 根：${signals.length} 個`;
   header.append(title, count);
   panel.append(header);
 
@@ -974,7 +974,7 @@ function makeTimeframe(frame) {
   if (signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "timeframe-empty";
-    empty.textContent = `目前篩選範圍的最近 ${recentBars} 根已完成 K 棒，沒有 Setup 9 或 Countdown 13。`;
+    empty.textContent = `目前篩選範圍中，訊號後 ${recentBars} 根已完成 K 棒內沒有 Setup 9 或 Countdown 13。`;
     panel.append(empty);
     return panel;
   }

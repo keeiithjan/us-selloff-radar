@@ -1044,9 +1044,14 @@ def collect_signals(
         recent_bars = int(os.getenv("RECENT_SIGNAL_BARS", "5"))
         if recent_bars < 1 or recent_bars > 20:
             raise ValueError("RECENT_SIGNAL_BARS 必須介於 1 到 20")
+        # `RECENT_SIGNAL_BARS=5` means that a signal remains visible through
+        # the fifth completed bar after it occurred (ages 0 through 5).  The
+        # previous strict-less-than comparison silently dropped a signal at
+        # exactly five bars ago, which made valid cards such as 8039 台虹 vanish
+        # one bar earlier than the dashboard policy states.
         recent_events = [
             event for event in events
-            if len(frame) - 1 - int(event["position"]) < recent_bars
+            if len(frame) - 1 - int(event["position"]) <= recent_bars
         ]
         # Resolve public company descriptions only for names that actually
         # create a card.  That keeps the 200+ Taiwan universe scan fast while
@@ -1096,7 +1101,7 @@ def collect_signals(
             recent_reclaims = [
                 event
                 for event in trend_reclaim_events(features)
-                if len(frame) - 1 - int(event["position"]) < recent_bars
+                if len(frame) - 1 - int(event["position"]) <= recent_bars
             ]
             for event in recent_reclaims:
                 if card_product_category is None:
