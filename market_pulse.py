@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Create the homepage futures pulse and US pre-market mover data.
+"""Create the homepage futures pulse data.
 
-GitHub Pages is static, so this script is intentionally run by Actions every
-five minutes.  It uses Yahoo Finance data and only labels a stock as a
-pre-market mover during the 04:00-09:30 America/New_York session.
+GitHub Pages is static, so the workflow periodically refreshes this compact
+quote payload before publishing the dashboard.
 """
 
 from __future__ import annotations
@@ -548,10 +547,7 @@ def write_payload(payload: dict[str, object]) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     now = datetime.now(UTC)
-    threshold_pct = _float_env("PREMARKET_ABNORMAL_PCT", 2.0, 0.1, 25.0)
-    max_movers = _positive_int_env("PREMARKET_MAX_MOVERS", 12, 1, 30)
     errors: list[str] = []
-    binance_contracts: dict[str, Symbol] = {}
 
     futures: list[dict[str, object]] = []
     for spec in FUTURES:
@@ -570,66 +566,17 @@ def main() -> None:
                 }
             )
 
-    try:
-        taiwan_weighted_1h = taiwan_weighted_technical_1h()
-    except Exception as exc:
-        logging.warning("Taiwan weighted technical refresh failed: %s", exc)
-        taiwan_weighted_1h = {
-            "available": False,
-            "reason": "Taiwan weighted 1-hour technical data is temporarily unavailable",
-        }
-        errors.append("Taiwan weighted 1-hour technical refresh failed")
-
-    try:
-        all_symbols = load_symbols(SYMBOLS_FILE)
-        symbols = selected_premarket_symbols(all_symbols)
-        frames = download_premarket_frames(symbols)
-        binance_contracts = discover_binance_equity_contracts(all_symbols)
-        binance_cash_tickers = {stock.ticker for stock in binance_contracts.values()}
-        movers = [
-            result
-            for item in symbols
-            if item.ticker not in binance_cash_tickers
-            if (result := premarket_mover(item, frames.get(item.ticker, pd.DataFrame()), now, threshold_pct))
-            is not None
-        ]
-        movers.extend(binance_equity_movers(binance_contracts, frames, now, threshold_pct))
-    except Exception as exc:
-        logging.warning("Pre-market scan failed: %s", exc)
-        symbols, frames, movers = [], {}, []
-        errors.append("盤前指標股資料暫時無法取得")
-
-    movers.sort(key=lambda item: abs(float(item["change_pct"])), reverse=True)
-    selected_movers = movers[:max_movers]
-    for mover in selected_movers:
-        if mover.get("source") == "Binance USDⓈ-M public API":
-            mover["sparkline"] = download_binance_sparkline(str(mover["symbol"]))
-    market_open = now.astimezone(NEW_YORK)
-    premarket_active = (
-        market_open.weekday() < 5 and PREMARKET_OPEN <= market_open.time() < REGULAR_OPEN
-    )
     write_payload(
         {
             "updated_at_utc": now.isoformat(),
             "futures": futures,
-            "taiwan_weighted_1h": taiwan_weighted_1h,
-            "premarket": {
-                "active": premarket_active,
-                "binance_equity_enabled": bool(binance_contracts),
-                "binance_equity_scanned_symbols": len(binance_contracts),
-                "threshold_pct": threshold_pct,
-                "scanned_symbols": len(frames),
-                "movers": selected_movers,
-            },
-            "source": "Yahoo Finance via yfinance；期貨與盤前報價可能延遲。",
+            "source": "Yahoo Finance via yfinance；期貨報價可能延遲。",
             "errors": errors,
         }
     )
     logging.info(
-        "Market pulse refreshed: %s futures, %s Taiwan 1h bars, %s pre-market movers",
+        "Market pulse refreshed: %s futures",
         len(futures),
-        len(taiwan_weighted_1h.get("bars", [])),
-        len(movers),
     )
 
 

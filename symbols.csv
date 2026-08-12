@@ -199,3 +199,203 @@ SNAP,NYSE,社群媒體
 SPOT,NYSE,音樂串流
 LYV,NYSE,現場娛樂
 CHTR,NASDAQ,有線電視與寬頻
+ANET,NYSE,資料中心交換器
+APP,NASDAQ,行動廣告平台
+CDNS,NASDAQ,IC 設計自動化 EDA
+CSCO,NASDAQ,企業網通設備
+CTAS,NASDAQ,企業制服與設施服務
+CTSH,NASDAQ,IT 顧問與外包服務
+FICO,NYSE,信用評分與分析軟體
+FI,NYSE,金融支付處理
+GDDY,NYSE,網域與雲端代管
+HUBS,NYSE,CRM 行銷自動化
+IBM,NYSE,企業 AI 與混合雲
+JKHY,NASDAQ,銀行核心軟體
+KEYS,NYSE,電子測試與量測
+MANH,NASDAQ,供應鏈管理軟體
+MSTR,NASDAQ,企業分析軟體與比特幣儲備
+MSI,NYSE,關鍵通訊與安防設備
+NTAP,NASDAQ,企業資料儲存
+OKTA,NASDAQ,身分驗證資安
+PATH,NYSE,流程自動化 RPA
+PTC,NASDAQ,工業軟體與數位孿生
+PYPL,NASDAQ,數位支付
+QLYS,NASDAQ,雲端資安檢測
+RDDT,NYSE,社群平台與廣告
+ROP,NASDAQ,垂直應用軟體
+S,NYSE,端點資安
+SHOP,NYSE,電商 SaaS 平台
+SNPS,NASDAQ,IC 設計自動化 EDA
+SQ,NYSE,商家支付與金融服務
+TEAM,NASDAQ,協作與 DevOps 軟體
+TYL,NYSE,政府與公共服務軟體
+VEEV,NYSE,生命科學雲端軟體
+WDAY,NASDAQ,企業人資與財務雲端
+ZM,NASDAQ,企業視訊協作
+CRDO,NASDAQ,高速資料中心連接晶片
+MTSI,NASDAQ,射頻與光通訊晶片
+OLED,NASDAQ,OLED 材料與專利
+ENTG,NASDAQ,半導體材料與耗材
+MKSI,NASDAQ,半導體製程設備
+EPAM,NYSE,數位工程外包
+GPN,NYSE,商家支付處理
+ACGL,NASDAQ,特種財產保險
+AFL,NYSE,補充保險
+AIZ,NYSE,保險與道路救援
+AJG,NYSE,保險經紀
+AON,NYSE,保險經紀與人力顧問
+BR,NYSE,投資人溝通與金融科技
+BRO,NYSE,保險經紀
+CFG,NYSE,區域銀行
+CMA,NYSE,區域銀行
+FITB,NASDAQ,區域銀行
+HBAN,NASDAQ,區域銀行
+KEY,NYSE,區域銀行
+L,NYSE,人壽保險
+MA,NYSE,信用卡支付網路
+MMC,NYSE,保險經紀與風險顧問
+MTB,NYSE,區域銀行
+NDAQ,NASDAQ,交易所與市場資料
+NTRS,NASDAQ,託管與資產服務
+PFG,NYSE,資產管理與退休金
+RJF,NYSE,財富管理券商
+RF,NYSE,區域銀行
+STT,NYSE,資產託管銀行
+SYF,NYSE,消費金融與信用卡
+TROW,NASDAQ,主動式資產管理
+V,NYSE,信用卡支付網路
+ABT,NYSE,醫療診斷與營養品
+ALGN,NASDAQ,隱形矯正牙套
+BAX,NYSE,醫療輸液與腎臟照護
+BDX,NYSE,醫療耗材與診斷
+CAH,NYSE,藥品通路
+CNC,NYSE,健康保險
+COR,NYSE,藥品通路與專科服務
+CRL,NYSE,臨床試驗委託服務 CRO
+DGX,NYSE,臨床檢驗服務
+HIMS,NYSE,遠距醫療與數位健康
+HOLX,NASDAQ,女性健康診斷
+HSIC,NASDAQ,牙科與醫療通路
+INCY,NASDAQ,腫瘤與免疫新藥
+IQV,NYSE,臨床試驗委託服務 CRO
+LH,NYSE,臨床檢驗服務
+MTD,NYSE,精密分析儀器
+NBIX,NASDAQ,神經科學新藥
+PODD,NASDAQ,胰島素幫浦與糖尿病設備
+RMD,NYSE,睡眠呼吸照護設備
+RVTY,NYSE,生命科學工具
+STE,NYSE,醫療器械消毒服務
+UHS,NYSE,醫院與行為健康
+WAT,NYSE,液相層析儀器
+WST,NYSE,注射劑包材與醫療耗材
+XRAY,NASDAQ,牙科設備與影像
+AME,NYSE,工業電子與測試設備
+APH,NYSE,連接器與線束
+AXON,NASDAQ,警用電擊器與數位證據
+CMI,NYSE,商用引擎與發電設備
+CPRT,NASDAQ,事故車拍賣平台
+DCI,NYSE,工業過濾系統
+DOV,NYSE,工業零組件與設備
+FAST,NASDAQ,工業緊固件通路
+GEV,NYSE,燃氣渦輪與電網設備
+GWW,NYSE,工業維修耗材通路
+HUBB,NYSE,電網與工業電氣設備
+IR,NYSE,工業真空與流體設備
+JCI,NYSE,樓宇自動化與消防安防
+JBHT,NASDAQ,公路貨運與物流
+LDOS,NYSE,國防 IT 與系統整合
+LII,NYSE,暖通空調設備
+MAS,NYSE,衛浴與建材產品
+NDSN,NASDAQ,精密點膠與測試設備
+ODFL,NASDAQ,零擔貨運 LTL
+OTIS,NYSE,電梯與手扶梯服務
+PCAR,NASDAQ,重型卡車
+PNR,NYSE,水處理與流體設備
+PWR,NYSE,電網工程與資料中心建設
+ROL,NYSE,害蟲防治服務
+SNA,NYSE,專業手工具
+SWK,NYSE,工業工具與五金
+TDG,NYSE,航太零組件
+TEL,NYSE,連接器與感測器
+TRMB,NASDAQ,測量定位與工程軟體
+URI,NYSE,工程設備租賃
+BBY,NYSE,消費電子零售
+BURL,NYSE,折扣服飾零售
+CAVA,NYSE,地中海餐飲連鎖
+CLX,NYSE,居家清潔用品
+CPB,NASDAQ,包裝食品
+COTY,NYSE,香水與美妝
+DKS,NYSE,運動用品零售
+EXPE,NASDAQ,線上旅遊平台
+HRL,NYSE,肉品與食品加工
+KDP,NASDAQ,咖啡與飲料
+KR,NYSE,超市零售
+LULU,NASDAQ,運動服飾
+LVS,NYSE,賭場與會展
+MGM,NYSE,賭場與飯店
+MKC,NYSE,香料與調味料
+MNST,NASDAQ,能量飲料
+QSR,NYSE,速食連鎖餐飲
+RL,NYSE,精品服飾
+ROST,NASDAQ,折扣服飾零售
+SJM,NYSE,包裝食品
+TAP,NYSE,啤酒與飲料
+TJX,NYSE,折扣零售
+TPR,NYSE,精品皮件與服飾
+TSCO,NASDAQ,農牧與居家用品零售
+ULTA,NASDAQ,美妝零售
+ALB,NYSE,鋰礦與電池材料
+AMT,NYSE,電信基地台 REIT
+AVB,NYSE,住宅 REIT
+AWK,NYSE,自來水公用事業
+BKR,NASDAQ,油田設備與服務
+CEG,NASDAQ,核能與再生能源發電
+CF,NYSE,氮肥與農業化學
+CCI,NYSE,電信基地台 REIT
+CNP,NYSE,天然氣與電力公用事業
+CTRA,NYSE,天然氣與頁岩油
+D,NYSE,電力公用事業
+DOW,NYSE,基礎化學材料
+DTE,NYSE,電力與天然氣公用事業
+DVN,NYSE,頁岩油氣開採
+ECL,NYSE,水處理與清潔化學
+ED,NYSE,電力公用事業
+EIX,NYSE,電力公用事業
+EMN,NYSE,特用化學材料
+EQIX,NASDAQ,資料中心 REIT
+EQR,NYSE,住宅 REIT
+ES,NYSE,新英格蘭電力公用事業
+ESS,NYSE,住宅 REIT
+ET,NYSE,天然氣管線
+EVRG,NASDAQ,電力公用事業
+EXR,NYSE,自助倉儲 REIT
+FANG,NASDAQ,頁岩油氣開採
+FE,NYSE,電力公用事業
+FRT,NYSE,零售商場 REIT
+HAL,NYSE,油田設備與服務
+HST,NASDAQ,飯店 REIT
+INVH,NYSE,單戶住宅 REIT
+IP,NYSE,包裝紙材
+IRM,NYSE,資訊儲存與資料中心 REIT
+KIM,NYSE,零售商場 REIT
+LNT,NASDAQ,電力公用事業
+LYB,NYSE,石化與塑料材料
+MAA,NYSE,住宅 REIT
+MOS,NYSE,鉀肥與磷肥
+NEM,NYSE,金礦開採
+NRG,NYSE,獨立發電商
+OKE,NYSE,天然氣中游管線
+PAA,NYSE,原油管線與儲運
+PCG,NYSE,電力與天然氣公用事業
+PEG,NYSE,電力與天然氣公用事業
+PLD,NYSE,物流倉儲 REIT
+PPL,NYSE,電力公用事業
+PSA,NYSE,自助倉儲 REIT
+SHW,NYSE,塗料與建材化學
+STLD,NASDAQ,鋼鐵與金屬加工
+TRGP,NYSE,天然氣中游管線
+VICI,NYSE,賭場不動產 REIT
+VMC,NYSE,骨材與水泥建材
+WEC,NYSE,電力與天然氣公用事業
+WELL,NYSE,醫療照護 REIT
+XEL,NASDAQ,電力公用事業

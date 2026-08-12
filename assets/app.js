@@ -12,12 +12,12 @@ const elements = {
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
-  taiexTechnicalUpdated: document.querySelector("#taiex-technical-updated"),
-  taiexTechnicalSummary: document.querySelector("#taiex-technical-summary"),
-  taiexTechnicalChart: document.querySelector("#taiex-technical-chart"),
-  premarketSummary: document.querySelector("#premarket-summary"),
-  premarketMovers: document.querySelector("#premarket-movers"),
-  premarketEmpty: document.querySelector("#premarket-empty"),
+  scanProgress: document.querySelector("#scan-progress"),
+  scanProgressState: document.querySelector("#scan-progress-state"),
+  scanProgressTrack: document.querySelector(".scan-progress-track"),
+  scanProgressFill: document.querySelector("#scan-progress-fill"),
+  scanProgressPercent: document.querySelector("#scan-progress-percent"),
+  scanProgressUpdated: document.querySelector("#scan-progress-updated"),
 };
 
 let sequentialPayload = null;
@@ -56,6 +56,18 @@ function formatMarketPrice(value, currency) {
     currency: code,
     maximumFractionDigits: ["TWD", "JPY", "KRW"].includes(code) ? 0 : 2,
   }).format(Number(value));
+}
+
+function formatSignalPrice(signal) {
+  const value = Number(signal?.last_price);
+  if (!Number.isFinite(value)) return "—";
+  if (signal?.market === "Pepperstone 外匯") {
+    return value.toLocaleString("en-US", {
+      minimumFractionDigits: value >= 20 ? 3 : 5,
+      maximumFractionDigits: value >= 20 ? 3 : 5,
+    });
+  }
+  return formatCurrency(value);
 }
 
 function formatSigned(value, digits = 2) {
@@ -613,34 +625,41 @@ function renderMarketPulse(payload) {
   refreshMarketAge();
   if (!marketAgeTimer) marketAgeTimer = window.setInterval(refreshMarketAge, 1_000);
 
-  renderTaiwanTechnical(payload.taiwan_weighted_1h || {});
-
-  const premarket = payload.premarket || {};
-  const movers = Array.isArray(premarket.movers) ? premarket.movers : [];
-  const threshold = Number(premarket.threshold_pct || 2);
-  elements.premarketSummary.textContent = premarket.active
-    ? `美東盤前中 · 已掃描 ${Number(premarket.scanned_symbols || 0)} 檔 · 異常門檻 ±${threshold}%`
-    : "僅於美東 04:00–09:30 掃描";
-  const binanceCount = Number(premarket.binance_equity_scanned_symbols || 0);
-  if (premarket.binance_equity_enabled && binanceCount > 0) {
-    elements.premarketSummary.textContent += `｜Binance 股票 USDT 合約監控 ${binanceCount} 檔`;
-  }
-  elements.premarketMovers.replaceChildren(
-    ...movers.map((mover) => {
-      const previous = motionState.movers.get(mover.symbol);
-      const motion = { ...quoteMotion(previous, mover, !motionState.hasMarket), previous };
-      return makePremarketCard(mover, motion);
-    })
-  );
-  elements.premarketEmpty.hidden = movers.length !== 0;
-  if (movers.length === 0) {
-    elements.premarketEmpty.textContent = premarket.active
-      ? `目前沒有指標股達到 ±${threshold}% 的盤前異常門檻。`
-      : "目前非美股盤前時段；下一個盤前時段會自動更新。";
-  }
   motionState.futures = quoteSnapshot(futures, "key");
-  motionState.movers = quoteSnapshot(movers, "symbol");
   motionState.hasMarket = true;
+}
+
+function totalScannedSymbols(payload) {
+  const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
+  return frames.reduce((largest, frame) => Math.max(largest, Number(frame.scanned_symbols || 0)), 0);
+}
+
+function setScanProgress(percent, state, updatedAt = null) {
+  if (!elements.scanProgress) return;
+  const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  elements.scanProgress.dataset.phase = value >= 100 ? "complete" : "scanning";
+  elements.scanProgressFill.style.width = `${value}%`;
+  elements.scanProgressTrack.setAttribute("aria-valuenow", String(value));
+  elements.scanProgressPercent.textContent = `${value}%`;
+  elements.scanProgressState.textContent = state;
+  elements.scanProgressUpdated.textContent = updatedAt
+    ? `最後更新：${formatTaipei(updatedAt)}`
+    : "最後更新：等待資料";
+}
+
+function animateScanProgress(payload) {
+  const total = totalScannedSymbols(payload);
+  let value = 4;
+  setScanProgress(value, total ? `掃描 ${total.toLocaleString("zh-TW")} 檔監測標的` : "讀取監測資料");
+  const timer = window.setInterval(() => {
+    value = Math.min(92, value + Math.max(4, Math.ceil((92 - value) / 3)));
+    setScanProgress(value, total ? `掃描 ${total.toLocaleString("zh-TW")} 檔監測標的` : "讀取監測資料");
+    if (value >= 92) window.clearInterval(timer);
+  }, 115);
+  window.setTimeout(() => {
+    window.clearInterval(timer);
+    setScanProgress(100, total ? `掃描完成 · ${total.toLocaleString("zh-TW")} 檔已更新` : "掃描完成", payload?.updated_at_utc || null);
+  }, 660);
 }
 
 function tdTrendPositionText(position) {
@@ -681,7 +700,7 @@ function makeSequentialSignal(signal, interval) {
 
   const price = document.createElement("strong");
   price.className = "signal-price";
-  price.textContent = formatCurrency(signal.last_price);
+  price.textContent = formatSignalPrice(signal);
   const quote = document.createElement("div");
   quote.className = "signal-quote";
   quote.append(price);
@@ -784,7 +803,7 @@ function makeTrendReclaimSignal(signal, interval) {
 
   const price = document.createElement("strong");
   price.className = "signal-price";
-  price.textContent = formatCurrency(signal.last_price);
+  price.textContent = formatSignalPrice(signal);
   const quote = document.createElement("div");
   quote.className = "signal-quote";
   quote.append(price);
@@ -975,6 +994,7 @@ function renderSequential(payload) {
   elements.tradingViewExportNote.textContent = exportCount
     ? `目前篩選結果可匯出 ${exportCount} 個不重複代號；同一標的跨週期僅保留一列。`
     : "目前篩選結果沒有可匯出的 TD 標的。";
+  animateScanProgress(payload);
 }
 
 async function loadJson(path) {

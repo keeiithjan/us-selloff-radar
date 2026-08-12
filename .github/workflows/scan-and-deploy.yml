@@ -13,8 +13,6 @@ on:
 env:
   RECENT_SIGNAL_BARS: "5"
   BINANCE_TOP_USDT_PAIRS: "40"
-  PREMARKET_ABNORMAL_PCT: "2.0"
-  PREMARKET_MAX_MOVERS: "12"
 
 permissions:
   contents: read

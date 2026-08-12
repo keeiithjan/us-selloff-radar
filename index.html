@@ -46,27 +46,6 @@
           </tv-ticker-tape>
         </div>
         <div id="futures-strip" class="futures-strip" aria-live="polite"></div>
-        <section class="taiex-technical" aria-labelledby="taiex-technical-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">TAIWAN WEIGHTED · 1H TECHNICAL</p>
-              <h2 id="taiex-technical-title">台灣加權・1 小時技術圖</h2>
-            </div>
-            <p id="taiex-technical-updated" class="muted"></p>
-          </div>
-          <p class="taiex-technical-note">整合 TD Sequential 9／13、白線／黃線與 EMA 50／100 趨勢帶；僅使用已完成的一小時 K 棒計算。</p>
-          <div id="taiex-technical-summary" class="taiex-technical-summary" aria-live="polite"></div>
-          <div id="taiex-technical-chart" class="taiex-technical-chart" aria-live="polite"></div>
-        </section>
-        <div class="premarket-heading">
-          <div>
-            <p class="eyebrow">US EXTENDED-HOURS MOVERS</p>
-            <h2>指標股盤前／夜盤異動</h2>
-          </div>
-          <p id="premarket-summary" class="muted"></p>
-        </div>
-        <div id="premarket-movers" class="premarket-movers" aria-live="polite"></div>
-        <p id="premarket-empty" class="premarket-empty" hidden></p>
       </section>
 
       <section class="sequential-monitor" aria-labelledby="sequential-title">
@@ -85,6 +64,7 @@
               <option value="美股">美股</option>
               <option value="台股">台股</option>
               <option value="幣安現貨">幣安現貨</option>
+              <option value="Pepperstone 外匯">Pepperstone 外匯</option>
             </select>
           </label>
           <label for="sequential-sort">排列
@@ -109,6 +89,17 @@
           <button id="download-tradingview-list" class="download-list" type="button">下載 TradingView 上傳清單 .TXT</button>
         </div>
         <p id="tradingview-export-note" class="tradingview-export-note">匯出依目前篩選條件彙整；同一標的跨週期訊號僅保留一列。</p>
+        <section id="scan-progress" class="scan-progress" aria-live="polite" aria-label="掃描進度">
+          <div class="scan-progress-copy">
+            <span class="scan-progress-label">DATA SCAN</span>
+            <strong id="scan-progress-state">讀取監測資料</strong>
+          </div>
+          <div class="scan-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="scan-progress-fill" class="scan-progress-fill"></span>
+          </div>
+          <span id="scan-progress-percent" class="scan-progress-percent">0%</span>
+          <p id="scan-progress-updated" class="scan-progress-updated">最後更新：等待資料</p>
+        </section>
         <div class="trend-reclaim-monitor" aria-labelledby="trend-reclaim-title">
           <div class="section-heading">
             <div>

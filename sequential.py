@@ -148,6 +148,7 @@ class MarketSession:
 US_SESSION = MarketSession(NEW_YORK, clock_time(9, 30), clock_time(16, 0))
 TW_SESSION = MarketSession(TAIPEI, clock_time(9, 0), clock_time(13, 30))
 CRYPTO_SESSION = MarketSession(UTC)
+FX_SESSION = MarketSession(UTC)
 
 
 @dataclass(frozen=True)
@@ -159,6 +160,40 @@ class Instrument:
     session: MarketSession
     name: str | None = None
     industry: str | None = None
+
+
+# This is a deliberately small, liquid FX core instead of Pepperstone's full
+# 90+ pair catalogue.  It prioritises majors and actively traded crosses that
+# are practical for a low-spread trading workflow.  Quotes use Yahoo Finance's
+# public FX history while the card and TradingView export retain Pepperstone's
+# chart symbol.
+PEPPERSTONE_PAIR_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("EURUSD=X", "EURUSD", "歐元／美元"),
+    ("JPY=X", "USDJPY", "美元／日圓"),
+    ("GBPUSD=X", "GBPUSD", "英鎊／美元"),
+    ("AUDUSD=X", "AUDUSD", "澳幣／美元"),
+    ("CAD=X", "USDCAD", "美元／加幣"),
+    ("CHF=X", "USDCHF", "美元／瑞郎"),
+    ("NZDUSD=X", "NZDUSD", "紐元／美元"),
+    ("EURJPY=X", "EURJPY", "歐元／日圓"),
+    ("EURGBP=X", "EURGBP", "歐元／英鎊"),
+    ("EURCHF=X", "EURCHF", "歐元／瑞郎"),
+    ("EURAUD=X", "EURAUD", "歐元／澳幣"),
+    ("EURCAD=X", "EURCAD", "歐元／加幣"),
+    ("GBPJPY=X", "GBPJPY", "英鎊／日圓"),
+    ("GBPCHF=X", "GBPCHF", "英鎊／瑞郎"),
+    ("GBPAUD=X", "GBPAUD", "英鎊／澳幣"),
+    ("GBPCAD=X", "GBPCAD", "英鎊／加幣"),
+    ("AUDJPY=X", "AUDJPY", "澳幣／日圓"),
+    ("AUDCAD=X", "AUDCAD", "澳幣／加幣"),
+    ("AUDNZD=X", "AUDNZD", "澳幣／紐元"),
+    ("CADJPY=X", "CADJPY", "加幣／日圓"),
+    ("CHFJPY=X", "CHFJPY", "瑞郎／日圓"),
+    ("NZDJPY=X", "NZDJPY", "紐元／日圓"),
+    ("NZDCHF=X", "NZDCHF", "紐元／瑞郎"),
+    ("EURNZD=X", "EURNZD", "歐元／紐元"),
+    ("GBPNZD=X", "GBPNZD", "英鎊／紐元"),
+)
 
 
 @dataclass
@@ -259,6 +294,8 @@ def product_category_for(instrument: Instrument) -> str:
         return "主力產品待建檔"
     if instrument.market == "幣安現貨":
         return "加密資產／USDT 現貨"
+    if instrument.market == "Pepperstone 外匯":
+        return "高流動性外匯貨幣對"
     return instrument.industry or "主力產品待建檔"
 
 
@@ -348,6 +385,22 @@ def download_taiwan_records(
         if code not in found
     ]
     return primary_records + download_yahoo_records(fallback, timeframe)
+
+
+def fetch_pepperstone_instruments() -> list[Instrument]:
+    """Return the 25-pair Pepperstone-focused FX monitoring pool."""
+    return [
+        Instrument(
+            ticker,
+            symbol,
+            "PEPPERSTONE",
+            "Pepperstone 外匯",
+            FX_SESSION,
+            name,
+            "主要／次要外匯貨幣對",
+        )
+        for ticker, symbol, name in PEPPERSTONE_PAIR_SPECS
+    ]
 
 
 def fetch_binance_instruments() -> list[Instrument]:
@@ -909,10 +962,12 @@ def collect_signals(
     taiwan_underlyings: dict[str, str],
     taiwan_industries: dict[str, str],
     binance_instruments: list[Instrument],
+    pepperstone_instruments: list[Instrument],
     timeframe: Timeframe,
     now: datetime,
 ) -> dict[str, object]:
     records = download_yahoo_records(us_instruments, timeframe)
+    records.extend(download_yahoo_records(pepperstone_instruments, timeframe))
     records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
@@ -1029,8 +1084,9 @@ def collect_signals(
 
 def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: list[str]) -> None:
     source = (
-        "美股與台股資料：Yahoo Finance via yfinance；台股監測清單：公開市場資料整理；"
-        "幣安：24 小時成交額最高的 USDT 現貨交易對（預設前 40 檔）與公開 K 線。"
+        "美股、台股與 Pepperstone 外匯 K 線：Yahoo Finance via yfinance；"
+        "台股監測清單：公開市場資料整理；幣安：24 小時成交額最高的 USDT 現貨交易對"
+        "（預設前 40 檔）與公開 K 線；Pepperstone 外匯池：25 組高流動性、低點差優先貨幣對。"
     )
     if errors:
         source += " 本次部分來源未更新：" + "；".join(errors)
@@ -1086,6 +1142,7 @@ def main() -> None:
         logging.warning("幣安標的清單讀取失敗：%s", exc)
         binance_instruments = []
         errors.append("幣安標的清單讀取失敗")
+    pepperstone_instruments = fetch_pepperstone_instruments()
 
     frames = [
         collect_signals(
@@ -1093,6 +1150,7 @@ def main() -> None:
             taiwan_underlyings,
             taiwan_industries,
             binance_instruments,
+            pepperstone_instruments,
             timeframe,
             now,
         )
