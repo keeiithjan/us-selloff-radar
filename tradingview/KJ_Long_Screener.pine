@@ -5,10 +5,9 @@
 // This is a long-only screener for confirmed Buy TD 9 / 13 and ribbon reclaim.
 
 //@version=6
-// `timeframe` exposes TradingView's built-in "Calculation / Timeframe" selector.
-// Leave the default blank to use the screen/chart interval; select 15, 60, or 1D
-// in the settings when creating a dedicated Pine Screener screen.
-indicator("KJ Long Screener · TD + Ribbon Reclaim", shorttitle="KJ LONG", overlay=true, max_labels_count=500, timeframe="")
+// A non-empty default is deliberate: Pine Screener otherwise hides the built-in
+// Calculation / Timeframe selector. 60 = one hour; choose 15 or 1D in Settings.
+indicator("KJ Long Screener · TD + Ribbon Reclaim", shorttitle="KJ LONG", overlay=true, max_labels_count=500, timeframe="60", timeframe_gaps=false)
 
 import jdehorty/KernelFunctions/2 as kernels
 
