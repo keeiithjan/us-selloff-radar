@@ -53,6 +53,13 @@ var int buySetup = 0
 buySetup := confirmed and close < close[4] ? (buySetup[1] == 9 ? 1 : nz(buySetup[1]) + 1) : 0
 newBuySetup9 = buySetup == 9
 
+// This sell setup is required even in a long-only scanner.  In the supplied
+// TD script, a completed Sell Setup 9 invalidates an in-progress Buy 13
+// countdown. Omitting it can create a false Buy Countdown 13.
+var int sellSetup = 0
+sellSetup := confirmed and close > close[4] ? (sellSetup[1] == 9 ? 1 : nz(sellSetup[1]) + 1) : 0
+newSellSetup9 = sellSetup == 9
+
 var int buyCountdown = 0
 var bool buyCountdownEnabled = false
 var float buySetupHighestHigh = na
@@ -65,6 +72,13 @@ if newBuySetup9
 
 if confirmed and buyCountdownEnabled and close < low[2]
     buyCountdown := buyCountdown + 1
+
+// Match the original TD invalidation rule: an opposite completed Setup 9
+// cancels the buy countdown before it can carry on to a false 13.
+if newSellSetup9
+    buyCountdownEnabled := false
+    buyCountdown := 0
+    buySetupHighestHigh := na
 
 if buyCountdown[1] == 13
     buyCountdownEnabled := false
