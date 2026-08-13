@@ -9,9 +9,9 @@
 ## 1. 建立指標
 
 1. 在 TradingView 開啟任意圖表，進入「Pine 編輯器」。
-2. 開啟 `KJ_Long_Screener.pine`，複製全部內容並貼上。
+2. 開啟所需週期的腳本，複製全部內容並貼上。
 3. 按「儲存」後按「新增至圖表」。
-4. 將 `KJ Long Screener · TD + Ribbon Reclaim` 加入最愛，Pine Screener 才會列出它。
+4. 將該週期對應的 KJ Long Screener 加入最愛，Pine Screener 才會列出它。
 
 ## 2. 匯入台股篩選母清單
 
@@ -23,7 +23,15 @@
 
 ## 3. Pine Screener 篩選設定
 
-點選 Pine Screener 上方 `KJ Long Screener · TD + Ribbon Reclaim` 的下拉箭頭，再選「設定」。設定視窗最上方會顯示「Calculation／計算」區塊，預設為 `60`（1 小時）；可改選 `15`（15 分鐘）或 `1D`（日線）。按「套用」後必須重新掃描。
+TradingView Pine Screener 目前不為這類自訂腳本提供可選的週期下拉框；「計算」區塊只有「等待時間週期結束」。因此改用三支週期固定的腳本，直接在上方「指標」選單選對應名稱：
+
+| 要掃描的週期 | 要加入最愛並在 Pine 篩選器選擇的指標 |
+| --- | --- |
+| 15 分鐘 | `KJ Long Screener 15m · TD + Ribbon Reclaim` |
+| 1 小時 | `KJ Long Screener 1H · TD + Ribbon Reclaim` |
+| 日線 | `KJ Long Screener 1D · TD + Ribbon Reclaim` |
+
+每個腳本在 Pine 編輯器儲存並「新增至圖表」後加入最愛一次，即可在 Pine 篩選器使用。這不需要再進設定找週期。
 
 每個時間框架分開建立一個儲存的篩選畫面：
 

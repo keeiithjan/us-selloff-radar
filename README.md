@@ -28,7 +28,9 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## TradingView Pine Screener
 
-- `tradingview/KJ_Long_Screener.pine`：只做多的 TD 9／13、8 根保留期、趨勢帶下方死亡交叉後站回白線條件。
+- `tradingview/KJ_Long_Screener_15m.pine`：固定 15 分鐘掃描。
+- `tradingview/KJ_Long_Screener.pine`：固定 1 小時掃描。
+- `tradingview/KJ_Long_Screener_1D.pine`：固定日線掃描。
 - `data/KJ-Taiwan-Pine-Screener-Universe.TXT`：每次掃描後產生的台股 Pine Screener 母清單；用來發掘未來新訊號，不限於目前已觸發 TD 的標的。
 - 完整操作請見 `tradingview/PINE_SCREENER_SOP.md`。
 
