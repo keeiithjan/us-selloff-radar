@@ -47,7 +47,7 @@ TradingView Pine Screener 目前不為這類自訂腳本提供可選的週期下
 
 - `KJ TD Value (9/13)`：13 優先。
 - `KJ TD Age (bars)`：由小到大，最新訊號優先。
-- `KJ Long Score`：2 為趨勢帶回站，1 為 TD，3 代表兩項條件同時仍在有效期。
+- `KJ Death Cross Below Ribbon Active`：嚴格條件；白線下穿黃線當下位於 EMA 50／100 趨勢帶下方，且之後仍保持在帶下、白線仍低於黃線。預設保留 30 根 K 棒。
 - `KJ TD Below Ribbon`：設為 1 時，只保留 TD 發生當下位於趨勢帶下方的標的。
 
 ## 4. 手機通知

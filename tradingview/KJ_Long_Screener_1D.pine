@@ -61,6 +61,10 @@ tdValue = tdActive ? ta.valuewhen(newTdEvent, newTdValue, 0) : 0
 tdBelowRibbon = tdActive ? ta.valuewhen(newTdEvent, fullyBelowRibbon ? 1 : 0, 0) : 0
 
 deathCrossBelowRibbon = confirmed and ta.crossunder(whiteLine, yellowLine) and fullyBelowRibbon
+deathCrossAge = ta.barssince(deathCrossBelowRibbon)
+// Strict context: the white/yellow cross happened below the lower ribbon edge,
+// and the setup remains below the ribbon with white still under yellow.
+deathCrossBelowRibbonActive = not na(deathCrossAge) and deathCrossAge <= reclaimLookbackBars and fullyBelowRibbon and whiteBelowYellow
 var int activeDeathCrossBar = na
 bool reclaimEvent = false
 if deathCrossBelowRibbon
@@ -79,9 +83,8 @@ reclaimAge = ta.barssince(reclaimEvent)
 reclaimActive = not na(reclaimAge) and reclaimAge <= tdWindowBars
 
 longCandidate = tdActive or reclaimActive
-longScore = (tdActive ? 1 : 0) + (reclaimActive ? 2 : 0)
 plot(longCandidate ? 1 : 0, "KJ Long Candidate", display=display.data_window + display.pine_screener)
-plot(longScore, "KJ Long Score", display=display.data_window + display.pine_screener)
+plot(deathCrossBelowRibbonActive ? 1 : 0, "KJ Death Cross Below Ribbon Active", display=display.data_window + display.pine_screener)
 plot(tdActive ? 1 : 0, "KJ Buy TD Active", display=display.data_window + display.pine_screener)
 plot(tdValue, "KJ TD Value (9/13)", display=display.data_window + display.pine_screener)
 plot(tdActive ? tdAge : na, "KJ TD Age (bars)", display=display.data_window + display.pine_screener)
