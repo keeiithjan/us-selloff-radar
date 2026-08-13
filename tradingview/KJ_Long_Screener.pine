@@ -49,47 +49,66 @@ confirmed = barstate.isconfirmed
 // ─────────────────────────────────────────────────────────────────────────────
 // Buy TD Sequential 9 / 13
 // ─────────────────────────────────────────────────────────────────────────────
+// Literal port of the supplied TD Sequential state machine.  The opposite
+// setup resets, both countdowns, and the completed-setup high/low checks are
+// all retained so a Buy 13 cannot be fabricated by a simplified state model.
 var int buySetup = 0
 buySetup := confirmed and close < close[4] ? (buySetup[1] == 9 ? 1 : nz(buySetup[1]) + 1) : 0
-newBuySetup9 = buySetup == 9
-
-// This sell setup is required even in a long-only scanner.  In the supplied
-// TD script, a completed Sell Setup 9 invalidates an in-progress Buy 13
-// countdown. Omitting it can create a false Buy Countdown 13.
 var int sellSetup = 0
 sellSetup := confirmed and close > close[4] ? (sellSetup[1] == 9 ? 1 : nz(sellSetup[1]) + 1) : 0
+newBuySetup9 = buySetup == 9
 newSellSetup9 = sellSetup == 9
-
 var int buyCountdown = 0
-var bool buyCountdownEnabled = false
-var float buySetupHighestHigh = na
+var int buyCountdownSwitch = 0
+var int sellCountdown = 0
+var int sellCountdownSwitch = 0
+var buyHighs = array.new_float(0, 0)
+var sellLows = array.new_float(0, 0)
 
 if newBuySetup9
-    buyCountdownEnabled := true
+    buyCountdownSwitch := 1
     buyCountdown := 0
-    currentSetupHigh = ta.highest(high, 9)
-    buySetupHighestHigh := na(buySetupHighestHigh) ? currentSetupHigh : math.max(buySetupHighestHigh, currentSetupHigh)
-
-if confirmed and buyCountdownEnabled and close < low[2]
-    buyCountdown := buyCountdown + 1
-
-// Match the original TD invalidation rule: an opposite completed Setup 9
-// cancels the buy countdown before it can carry on to a false 13.
-if newSellSetup9
-    buyCountdownEnabled := false
+    sellCountdownSwitch := 0
+    sellCountdown := 0
+if newBuySetup9 and buyCountdownSwitch == 1
     buyCountdown := 0
-    buySetupHighestHigh := na
-
+if confirmed and close < low[2] and buyCountdownSwitch == 1
+    buyCountdown += 1
 if buyCountdown[1] == 13
-    buyCountdownEnabled := false
+    buyCountdownSwitch := 0
     buyCountdown := 0
 
-if confirmed and buyCountdownEnabled and not na(buySetupHighestHigh) and close > buySetupHighestHigh
-    buyCountdownEnabled := false
+if newSellSetup9
+    sellCountdownSwitch := 1
+    sellCountdown := 0
+    buyCountdownSwitch := 0
     buyCountdown := 0
+if newSellSetup9 and sellCountdownSwitch == 1
+    sellCountdown := 0
+if confirmed and close > high[2] and sellCountdownSwitch == 1
+    sellCountdown += 1
+if sellCountdown[1] == 13
+    sellCountdownSwitch := 0
+    sellCountdown := 0
 
-if not buyCountdownEnabled
-    buySetupHighestHigh := na
+if newBuySetup9
+    for offset = 0 to 8
+        array.push(buyHighs, high[offset])
+if newSellSetup9
+    for offset = 0 to 8
+        array.push(sellLows, low[offset])
+if buyCountdownSwitch == 0
+    array.clear(buyHighs)
+if sellCountdownSwitch == 0
+    array.clear(sellLows)
+highestHighBuy = array.size(buyHighs) > 0 ? array.max(buyHighs) : na
+lowestLowSell = array.size(sellLows) > 0 ? array.min(sellLows) : na
+if confirmed and buyCountdownSwitch == 1 and not na(highestHighBuy) and close > highestHighBuy
+    buyCountdownSwitch := 0
+    buyCountdown := 0
+if confirmed and sellCountdownSwitch == 1 and not na(lowestLowSell) and close < lowestLowSell
+    sellCountdownSwitch := 0
+    sellCountdown := 0
 
 newBuyCountdown13 = buyCountdown == 13
 newTdEvent = confirmed and (newBuySetup9 or newBuyCountdown13)
