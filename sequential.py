@@ -35,13 +35,27 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
 TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
 TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TXT"
+BINANCE_CRYPTO_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Crypto-Perpetuals.TXT"
+BINANCE_STOCK_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Stock-Perpetuals.TXT"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
 TAIFEX_STOCK_FUTURES_URL = "https://www.taifex.com.tw/cht/5/stockMargining"
 BINANCE_DATA_URL = "https://data-api.binance.vision/api/v3"
+BINANCE_FUTURES_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
 TWSE_COMPANY_INFO_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_COMPANY_INFO_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
+
+# Binance's TradFi tab lists perpetual contracts that track these individual
+# equities. Keep stocks separate from ETFs, indices, commodities, and crypto so
+# this file is a clean TradingView universe for the requested stock-perp scan.
+# Source: Binance Academy's April 2026 TradFi contracts overview.
+BINANCE_STOCK_PERPETUALS = (
+    "MSTR", "COIN", "HOOD", "CRCL", "PAYP",
+    "TSLA", "AMZN", "META", "GOOGL", "AAPL", "MSFT",
+    "NVDA", "MU", "SNDK", "TSM", "AVGO", "INTC",
+    "PLTR", "BABA",
+)
 
 # TWSE / TPEx publish two-digit industry codes in their company datasets.
 # Convert them before writing JSON so users see a meaningful sector, not "24".
@@ -499,6 +513,39 @@ def fetch_binance_instruments() -> list[Instrument]:
         Instrument(symbol, symbol, "BINANCE", "幣安現貨", CRYPTO_SESSION)
         for _, symbol in selected[:configured]
     ]
+
+
+def fetch_binance_crypto_perpetual_symbols() -> list[str]:
+    """Return every live USDⓈ-M crypto perpetual in TradingView import format.
+
+    Binance's exchange-info payload classifies the underlying as ``COIN``. The
+    separate TradFi equity perpetuals do not reliably appear in every regional
+    public API response, so those use the curated stock-perp universe below.
+    """
+    payload = _http_json_url(BINANCE_FUTURES_INFO_URL)
+    rows = payload.get("symbols", []) if isinstance(payload, dict) else []
+    symbols: set[str] = set()
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol", "")).upper()
+        if (
+            row.get("status") == "TRADING"
+            and row.get("contractType") == "PERPETUAL"
+            and row.get("quoteAsset") == "USDT"
+            and row.get("marginAsset") == "USDT"
+            and row.get("underlyingType") == "COIN"
+            and re.fullmatch(r"[A-Z0-9]+USDT", symbol)
+        ):
+            symbols.add(f"BINANCE:{symbol}.P")
+    if not symbols:
+        raise RuntimeError("Binance 未回傳交易中的 USDT 加密永續合約")
+    return sorted(symbols)
+
+
+def binance_stock_perpetual_symbols() -> list[str]:
+    """Return the Binance TradFi individual-stock perpetual universe."""
+    return [f"BINANCE:{symbol}USDT.P" for symbol in BINANCE_STOCK_PERPETUALS]
 
 
 def _download_binance_frame(symbol: str, timeframe: Timeframe) -> pd.DataFrame:
@@ -1207,11 +1254,17 @@ def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[
     return [symbol for symbol, _ in sorted(tradingview_entries.items(), key=tradingview_sort_key)]
 
 
-def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: list[str]) -> None:
+def write_payload(
+    frames: Iterable[dict[str, object]],
+    now: datetime,
+    errors: list[str],
+    binance_crypto_perpetuals: list[str] | None = None,
+) -> None:
     source = (
         "美股、台股與 Pepperstone 外匯 K 線：Yahoo Finance via yfinance；"
         "台股監測清單：公開市場資料整理；幣安：24 小時成交額最高的 USDT 現貨交易對"
-        "（預設前 40 檔）與公開 K 線；Pepperstone 外匯池：25 組高流動性、低點差優先貨幣對。"
+        "（預設前 40 檔）與公開 K 線；Binance 加密 USDT 永續合約清單：Futures exchangeInfo 公開資料；"
+        "Pepperstone 外匯池：25 組高流動性、低點差優先貨幣對。"
     )
     if errors:
         source += " 本次部分來源未更新：" + "；".join(errors)
@@ -1260,6 +1313,20 @@ def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: li
         "\n".join(ordered_taiwan_symbols) + ("\n" if ordered_taiwan_symbols else ""),
         encoding="utf-8",
     )
+    # Full live Binance crypto-perpetual universe. These are not signal-only
+    # exports; import the list into TradingView to scan every active contract.
+    if binance_crypto_perpetuals is not None:
+        BINANCE_CRYPTO_PERPETUALS_FILE.write_text(
+            "\n".join(binance_crypto_perpetuals) + ("\n" if binance_crypto_perpetuals else ""),
+            encoding="utf-8",
+        )
+    # Individual-equity TradFi perpetuals only. ETFs, indexes and commodities
+    # are intentionally excluded so this remains the requested stock list.
+    stock_perps = binance_stock_perpetual_symbols()
+    BINANCE_STOCK_PERPETUALS_FILE.write_text(
+        "\n".join(stock_perps) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> None:
@@ -1283,6 +1350,12 @@ def main() -> None:
         logging.warning("幣安標的清單讀取失敗：%s", exc)
         binance_instruments = []
         errors.append("幣安標的清單讀取失敗")
+    try:
+        binance_crypto_perpetuals = fetch_binance_crypto_perpetual_symbols()
+    except Exception as exc:
+        logging.warning("幣安加密永續合約清單讀取失敗：%s", exc)
+        binance_crypto_perpetuals = None
+        errors.append("幣安加密永續合約清單讀取失敗")
     pepperstone_instruments = fetch_pepperstone_instruments()
     public_profile_cache: dict[str, str | None] = {}
 
@@ -1299,7 +1372,7 @@ def main() -> None:
         )
         for timeframe in TIMEFRAMES
     ]
-    write_payload(frames, now, errors)
+    write_payload(frames, now, errors, binance_crypto_perpetuals)
     logging.info(
         "Sequential 已更新：%s",
         ", ".join(f"{item['label']} {len(item['signals'])} 個訊號" for item in frames),

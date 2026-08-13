@@ -32,6 +32,8 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 - `tradingview/KJ_Long_Screener.pine`：固定 1 小時掃描。
 - `tradingview/KJ_Long_Screener_1D.pine`：固定日線掃描。
 - `data/KJ-Taiwan-Pine-Screener-Universe.TXT`：每次掃描後產生的台股 Pine Screener 母清單；用來發掘未來新訊號，不限於目前已觸發 TD 的標的。
+- `data/KJ-Binance-Crypto-Perpetuals.TXT`：Binance 所有交易中 USDⓈ-M 加密 USDT 永續合約，依 Binance Futures 公開 `exchangeInfo` 每次掃描更新。
+- `data/KJ-Binance-Stock-Perpetuals.TXT`：Binance TradFi 的個股永續合約清單，僅含個股、排除 ETF／指數／商品。
 - 完整操作請見 `tradingview/PINE_SCREENER_SOP.md`。
 
 ## 更新與資料來源
