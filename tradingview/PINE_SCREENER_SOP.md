@@ -23,6 +23,8 @@
 
 ## 3. Pine Screener 篩選設定
 
+點選 Pine Screener 上方 `KJ Long Screener · TD + Ribbon Reclaim` 的下拉箭頭，再選「設定」。在設定視窗最上方的「Calculation／計算」區塊，選擇「Timeframe／時間框架」：`15`（15 分鐘）、`60`（1 小時）或 `1D`（日線）。按「套用」後必須重新掃描。
+
 每個時間框架分開建立一個儲存的篩選畫面：
 
 | 用途 | 時間框架 | 欄位與條件 |
