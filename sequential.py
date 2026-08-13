@@ -34,6 +34,7 @@ from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_sessi
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
 TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
+TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TXT"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
@@ -1030,6 +1031,7 @@ def collect_signals(
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
     trend_reclaim_signals: list[dict[str, object]] = []
+    taiwan_universe: dict[str, dict[str, str]] = {}
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
@@ -1038,6 +1040,17 @@ def collect_signals(
         if len(frame) < 13:
             continue
         scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
+        if instrument.market == "台股":
+            category = TAIWAN_PRODUCT_CATEGORIES.get(instrument.symbol)
+            if not category:
+                category = f"產業：{instrument.industry}" if instrument.industry else "其他台股"
+            taiwan_universe[instrument.symbol] = {
+                "symbol": instrument.symbol,
+                "exchange": instrument.exchange,
+                "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
+                "product_category": category,
+                "industry": instrument.industry or "",
+            }
         _, events = sequential_history(frame)
         latest_completed.append((pd.Timestamp(frame.index[-1]), instrument.session))
         today_change_pct = latest_day_change_pct(frame, timeframe, instrument.session)
@@ -1150,6 +1163,14 @@ def collect_signals(
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
         "trend_reclaim_signals": trend_reclaim_signals,
+        "taiwan_pine_screener_universe": sorted(
+            taiwan_universe.values(),
+            key=lambda item: (
+                str(item["product_category"]),
+                str(item["industry"]),
+                str(item["tradingview_symbol"]),
+            ),
+        ),
     }
 
 
@@ -1209,6 +1230,34 @@ def write_payload(frames: Iterable[dict[str, object]], now: datetime, errors: li
     tradingview_symbols = tradingview_export_symbols(frame_list)
     TRADINGVIEW_EXPORT_FILE.write_text(
         "\n".join(tradingview_symbols) + ("\n" if tradingview_symbols else ""),
+        encoding="utf-8",
+    )
+    # A stable Taiwan universe for Pine Screener. Unlike the TD export above,
+    # this contains every Taiwan symbol successfully scanned in the current
+    # run, so TradingView can discover future signals rather than only opening
+    # symbols already in the 8-bar TD window.
+    taiwan_universe: dict[str, dict[str, object]] = {}
+    for timeframe in frame_list:
+        entries = timeframe.get("taiwan_pine_screener_universe", []) if isinstance(timeframe, dict) else []
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            symbol = str(entry.get("tradingview_symbol") or "").strip()
+            if symbol:
+                taiwan_universe[symbol] = entry
+    ordered_taiwan_symbols = [
+        symbol
+        for symbol, _ in sorted(
+            taiwan_universe.items(),
+            key=lambda item: (
+                str(item[1].get("product_category") or "其他台股").casefold(),
+                str(item[1].get("industry") or "").casefold(),
+                item[0],
+            ),
+        )
+    ]
+    TAIWAN_PINE_SCREENER_FILE.write_text(
+        "\n".join(ordered_taiwan_symbols) + ("\n" if ordered_taiwan_symbols else ""),
         encoding="utf-8",
     )
 

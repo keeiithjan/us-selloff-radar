@@ -26,6 +26,12 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 每次 GitHub Actions 完成掃描，亦會產生 `data/KJ-Radar-TradingView.TXT`，內容僅含做多 TD 標的，並依市場與主力產品／產業排序。
 
+## TradingView Pine Screener
+
+- `tradingview/KJ_Long_Screener.pine`：只做多的 TD 9／13、8 根保留期、趨勢帶下方死亡交叉後站回白線條件。
+- `data/KJ-Taiwan-Pine-Screener-Universe.TXT`：每次掃描後產生的台股 Pine Screener 母清單；用來發掘未來新訊號，不限於目前已觸發 TD 的標的。
+- 完整操作請見 `tradingview/PINE_SCREENER_SOP.md`。
+
 ## 更新與資料來源
 
 GitHub Actions 平日每 30 分鐘更新一次。行情資料主要來自 Yahoo Finance（透過 `yfinance`）、台灣證交所／櫃買中心公開公司基本資料、台灣期交所標的清單，以及 Binance 公開 K 線與成交資料。Pepperstone 分類依其公開低點差外匯交易對資訊建置。

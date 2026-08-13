@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: MPL-2.0
+// KJ Long Screener
+// Derived for KJ Radar System from the user-supplied TD Sequential,
+// AI Momentum [YinYang], and Trend Trader concepts.
+// This is a long-only screener for confirmed Buy TD 9 / 13 and ribbon reclaim.
+
+//@version=6
+indicator("KJ Long Screener · TD + Ribbon Reclaim", shorttitle="KJ LONG", overlay=true, max_labels_count=500)
+
+import jdehorty/KernelFunctions/2 as kernels
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────────────────────
+groupTd = "TD Sequential"
+tdWindowBars = input.int(8, "訊號後保留完成 K 棒", minval=1, maxval=20, group=groupTd)
+showMarks = input.bool(true, "顯示圖表標記", group=groupTd)
+
+groupMomentum = "AI Momentum（與原指標相同）"
+zoneInsideLength = input.int(50, "Zone Inside Length", minval=5, group=groupMomentum)
+kernelLookback = input.int(8, "Lookback Window", minval=3, maxval=50, group=groupMomentum)
+relativeWeighting = input.float(8.0, "Relative Weighting", minval=0.25, maxval=25.0, step=0.25, group=groupMomentum)
+startBar = input.int(25, "Start Regression at Bar", minval=5, maxval=100, group=groupMomentum)
+
+groupRibbon = "Trend Ribbon／回站做多"
+ribbonFastLength = input.int(50, "EMA Fast", minval=1, group=groupRibbon)
+ribbonSlowLength = input.int(100, "EMA Slow", minval=2, group=groupRibbon)
+reclaimLookbackBars = input.int(30, "死亡交叉後最長回站 K 棒", minval=1, maxval=100, group=groupRibbon)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Momentum white / yellow lines and EMA 50 / 100 trend ribbon
+// White = kernClose; yellow = zoneMid.  These match the supplied indicators.
+// ─────────────────────────────────────────────────────────────────────────────
+insideHigh = kernels.rationalQuadratic(ta.highest(high, zoneInsideLength), kernelLookback, relativeWeighting, startBar)
+insideLow = kernels.rationalQuadratic(ta.lowest(low, zoneInsideLength), kernelLookback, relativeWeighting, startBar)
+whiteLine = kernels.rationalQuadratic(close, kernelLookback, relativeWeighting, startBar)
+yellowLine = math.avg(insideHigh, insideLow)
+
+emaFast = ta.ema(close, ribbonFastLength)
+emaSlow = ta.ema(close, ribbonSlowLength)
+ribbonLower = math.min(emaFast, emaSlow)
+
+whiteBelowYellow = whiteLine < yellowLine
+fullyBelowRibbon = math.max(close, math.max(whiteLine, yellowLine)) < ribbonLower
+confirmed = barstate.isconfirmed
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Buy TD Sequential 9 / 13
+// ─────────────────────────────────────────────────────────────────────────────
+var int buySetup = 0
+buySetup := confirmed and close < close[4] ? (buySetup[1] == 9 ? 1 : nz(buySetup[1]) + 1) : 0
+newBuySetup9 = buySetup == 9
+
+var int buyCountdown = 0
+var bool buyCountdownEnabled = false
+var float buySetupHighestHigh = na
+
+if newBuySetup9
+    buyCountdownEnabled := true
+    buyCountdown := 0
+    currentSetupHigh = ta.highest(high, 9)
+    buySetupHighestHigh := na(buySetupHighestHigh) ? currentSetupHigh : math.max(buySetupHighestHigh, currentSetupHigh)
+
+if confirmed and buyCountdownEnabled and close < low[2]
+    buyCountdown := buyCountdown + 1
+
+if buyCountdown[1] == 13
+    buyCountdownEnabled := false
+    buyCountdown := 0
+
+if confirmed and buyCountdownEnabled and not na(buySetupHighestHigh) and close > buySetupHighestHigh
+    buyCountdownEnabled := false
+    buyCountdown := 0
+
+if not buyCountdownEnabled
+    buySetupHighestHigh := na
+
+newBuyCountdown13 = buyCountdown == 13
+newTdEvent = confirmed and (newBuySetup9 or newBuyCountdown13)
+newTdValue = newBuyCountdown13 ? 13 : newBuySetup9 ? 9 : 0
+tdAge = ta.barssince(newTdEvent)
+tdActive = not na(tdAge) and tdAge <= tdWindowBars
+tdValue = tdActive ? ta.valuewhen(newTdEvent, newTdValue, 0) : 0
+tdBelowRibbon = tdActive ? ta.valuewhen(newTdEvent, fullyBelowRibbon ? 1 : 0, 0) : 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Long reclaim: white/yellow death cross below the EMA ribbon, then a close
+// crosses back above white while white remains below yellow. Every bar from
+// death cross through reclaim must remain below the ribbon.
+// ─────────────────────────────────────────────────────────────────────────────
+deathCrossBelowRibbon = confirmed and ta.crossunder(whiteLine, yellowLine) and fullyBelowRibbon
+var int activeDeathCrossBar = na
+bool reclaimEvent = false
+
+if deathCrossBelowRibbon
+    activeDeathCrossBar := bar_index
+
+if not na(activeDeathCrossBar)
+    if not fullyBelowRibbon
+        activeDeathCrossBar := na
+    else if bar_index - activeDeathCrossBar > reclaimLookbackBars
+        activeDeathCrossBar := na
+    else
+        reclaimWhite = confirmed and bar_index > activeDeathCrossBar and ta.crossover(close, whiteLine) and whiteBelowYellow
+        if reclaimWhite
+            reclaimEvent := true
+            activeDeathCrossBar := na
+
+reclaimAge = ta.barssince(reclaimEvent)
+reclaimActive = not na(reclaimAge) and reclaimAge <= tdWindowBars
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pine Screener columns. Keep these first: Pine Screener imports the first ten
+// plots as table columns. 1 means the condition is currently eligible.
+// ─────────────────────────────────────────────────────────────────────────────
+longCandidate = tdActive or reclaimActive
+longScore = (tdActive ? 1 : 0) + (reclaimActive ? 2 : 0)
+
+plot(longCandidate ? 1 : 0, "KJ Long Candidate", display=display.data_window + display.pine_screener)
+plot(longScore, "KJ Long Score", display=display.data_window + display.pine_screener)
+plot(tdActive ? 1 : 0, "KJ Buy TD Active", display=display.data_window + display.pine_screener)
+plot(tdValue, "KJ TD Value (9/13)", display=display.data_window + display.pine_screener)
+plot(tdActive ? tdAge : na, "KJ TD Age (bars)", display=display.data_window + display.pine_screener)
+plot(tdBelowRibbon, "KJ TD Below Ribbon", display=display.data_window + display.pine_screener)
+plot(reclaimActive ? 1 : 0, "KJ White Reclaim Active", display=display.data_window + display.pine_screener)
+plot(reclaimActive ? reclaimAge : na, "KJ Reclaim Age (bars)", display=display.data_window + display.pine_screener)
+plot(fullyBelowRibbon ? 1 : 0, "KJ Fully Below Ribbon Now", display=display.data_window + display.pine_screener)
+plot(whiteBelowYellow ? 1 : 0, "KJ White Below Yellow", display=display.data_window + display.pine_screener)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chart visuals (not required for screening)
+// ─────────────────────────────────────────────────────────────────────────────
+ribbonFastPlot = plot(showMarks ? emaFast : na, "EMA 50", color=color.lime, linewidth=2)
+ribbonSlowPlot = plot(showMarks ? emaSlow : na, "EMA 100", color=color.red, linewidth=2)
+fill(ribbonFastPlot, ribbonSlowPlot, color=color.new(color.silver, 82), title="EMA 50/100 Ribbon")
+plot(showMarks ? whiteLine : na, "AI Momentum White", color=color.white, linewidth=2)
+plot(showMarks ? yellowLine : na, "AI Momentum Yellow", color=color.yellow, linewidth=2)
+
+plotshape(showMarks and newBuySetup9, title="KJ Buy TD 9", text="9", style=shape.labelup, location=location.belowbar, color=color.teal, textcolor=color.white, size=size.tiny)
+plotshape(showMarks and newBuyCountdown13, title="KJ Buy TD 13", text="13", style=shape.labelup, location=location.belowbar, color=color.aqua, textcolor=color.black, size=size.tiny)
+plotshape(showMarks and deathCrossBelowRibbon, title="KJ Death Cross Below Ribbon", text="×", style=shape.circle, location=location.belowbar, color=color.orange, textcolor=color.black, size=size.tiny)
+plotshape(showMarks and reclaimEvent, title="KJ White Reclaim", text="L", style=shape.labelup, location=location.belowbar, color=color.lime, textcolor=color.black, size=size.tiny)
+
+// Pine Screener presents the first two alert conditions. Both emit only on the
+// confirmed signal bar; the first covers either type of long candidate.
+newLongCandidate = newTdEvent or reclaimEvent
+alertcondition(newLongCandidate, "KJ Long Candidate", "KJ long candidate confirmed on {{exchange}}:{{ticker}} ({{interval}})")
+alertcondition(newTdEvent, "KJ Long TD 9/13", "KJ Long TD confirmed on {{exchange}}:{{ticker}} ({{interval}})")
