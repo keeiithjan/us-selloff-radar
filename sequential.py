@@ -43,6 +43,7 @@ UTC = timezone.utc
 TAIFEX_STOCK_FUTURES_URL = "https://www.taifex.com.tw/cht/5/stockMargining"
 BINANCE_DATA_URL = "https://data-api.binance.vision/api/v3"
 BINANCE_FUTURES_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+BINANCE_FUTURES_DATA_URL = "https://fapi.binance.com/fapi/v1"
 TWSE_COMPANY_INFO_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_COMPANY_INFO_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
 
@@ -364,11 +365,19 @@ def product_category_for(
         if instrument.industry:
             return f"產業分類：{instrument.industry}"
         return "產業分類：交易所未提供"
-    if instrument.market == "幣安現貨":
-        return "加密資產／USDT 現貨"
+    if instrument.market == "幣安 USDT 永續":
+        return "加密資產／USDT 永續"
     if instrument.market == "Pepperstone 外匯":
         return "高流動性外匯貨幣對"
     return instrument.industry or "產業分類：交易所未提供"
+
+
+def tradingview_symbol_for(instrument: Instrument) -> str:
+    """Return the TradingView ticker, including .P for Binance perpetuals."""
+    ticker = instrument.symbol
+    if instrument.market == "幣安 USDT 永續":
+        ticker = f"{ticker}.P"
+    return f"{instrument.exchange}:{ticker}"
 
 
 def fetch_taifex_stock_futures() -> dict[str, str]:
@@ -476,31 +485,50 @@ def fetch_pepperstone_instruments() -> list[Instrument]:
 
 
 def fetch_binance_instruments() -> list[Instrument]:
-    """Select the most liquid Binance Spot USDT pairs, excluding stable coins."""
-    configured = int(os.getenv("BINANCE_TOP_USDT_PAIRS", "40"))
-    if configured < 1 or configured > 100:
-        raise ValueError("BINANCE_TOP_USDT_PAIRS 必須介於 1 到 100")
-    rows = _http_json("/ticker/24hr")
-    if not isinstance(rows, list):
-        raise RuntimeError("無法取得幣安 24 小時成交資料")
+    """Select the most liquid live Binance USDⓈ-M USDT crypto perpetuals.
+
+    The export file intentionally contains every valid contract.  Monitoring is
+    capped at a liquid, predictable pool (default 200), ranked by Binance's
+    rolling 24-hour USDT notional volume.  This avoids consuming Actions time
+    on inactive long-tail contracts while monitoring the pairs most relevant to
+    the Radar.
+    """
+    configured = int(os.getenv("BINANCE_FUTURES_TOP_USDT_PERPETUALS", "200"))
+    if configured < 1 or configured > 250:
+        raise ValueError("BINANCE_FUTURES_TOP_USDT_PERPETUALS 必須介於 1 到 250")
 
     stable_bases = {
         "USDT", "USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD", "GUSD", "LUSD",
-        "FRAX", "USDD", "USDE", "USDS", "USD1", "PYUSD", "RLUSD", "DUSD", "EUR", "TRY",
+        "FRAX", "USDD", "USDE", "USDS", "USD1", "PYUSD", "RLUSD", "DUSD",
     }
-    leveraged_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+
+    info = _http_json_url(BINANCE_FUTURES_INFO_URL)
+    contracts = info.get("symbols", []) if isinstance(info, dict) else []
+    active: set[str] = set()
+    for contract in contracts if isinstance(contracts, list) else []:
+        if not isinstance(contract, dict):
+            continue
+        symbol = str(contract.get("symbol", "")).upper()
+        if (
+            contract.get("status") == "TRADING"
+            and contract.get("contractType") == "PERPETUAL"
+            and contract.get("quoteAsset") == "USDT"
+            and contract.get("marginAsset") == "USDT"
+            and contract.get("underlyingType") == "COIN"
+            and re.fullmatch(r"[A-Z0-9]+USDT", symbol)
+            and symbol.removesuffix("USDT") not in stable_bases
+        ):
+            active.add(symbol)
+    if not active:
+        raise RuntimeError("Binance 未回傳交易中的 USDT 加密永續合約")
+
+    ticker_rows = _http_json_url(f"{BINANCE_FUTURES_DATA_URL}/ticker/24hr")
     selected: list[tuple[float, str]] = []
-    for row in rows:
+    for row in ticker_rows if isinstance(ticker_rows, list) else []:
         if not isinstance(row, dict):
             continue
         symbol = str(row.get("symbol", "")).upper()
-        base = symbol.removesuffix("USDT")
-        if (
-            not symbol.endswith("USDT")
-            or not re.fullmatch(r"[A-Z0-9]+USDT", symbol)
-            or base in stable_bases
-            or symbol.endswith(leveraged_suffixes)
-        ):
+        if symbol not in active:
             continue
         try:
             volume = float(row.get("quoteVolume", 0))
@@ -508,9 +536,17 @@ def fetch_binance_instruments() -> list[Instrument]:
             continue
         if volume > 0:
             selected.append((volume, symbol))
-    selected.sort(reverse=True)
+    selected.sort(key=lambda item: (-item[0], item[1]))
     return [
-        Instrument(symbol, symbol, "BINANCE", "幣安現貨", CRYPTO_SESSION)
+        Instrument(
+            ticker=symbol,
+            symbol=symbol,
+            exchange="BINANCE",
+            market="幣安 USDT 永續",
+            session=CRYPTO_SESSION,
+            name=f"{symbol.removesuffix('USDT')} / USDT 永續",
+            industry="USDT 永續合約",
+        )
         for _, symbol in selected[:configured]
     ]
 
@@ -549,7 +585,9 @@ def binance_stock_perpetual_symbols() -> list[str]:
 
 
 def _download_binance_frame(symbol: str, timeframe: Timeframe) -> pd.DataFrame:
-    rows = _http_json(f"/klines?symbol={symbol}&interval={timeframe.key}&limit=120")
+    rows = _http_json_url(
+        f"{BINANCE_FUTURES_DATA_URL}/klines?symbol={symbol}&interval={timeframe.key}&limit=120"
+    )
     if not isinstance(rows, list) or not rows:
         return pd.DataFrame()
     values = []
@@ -1094,7 +1132,7 @@ def collect_signals(
             taiwan_universe[instrument.symbol] = {
                 "symbol": instrument.symbol,
                 "exchange": instrument.exchange,
-                "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
+                "tradingview_symbol": tradingview_symbol_for(instrument),
                 "product_category": category,
                 "industry": instrument.industry or "",
             }
@@ -1134,7 +1172,7 @@ def collect_signals(
                     "industry": instrument.industry,
                     "product_category": card_product_category,
                     "exchange": instrument.exchange,
-                    "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
+                    "tradingview_symbol": tradingview_symbol_for(instrument),
                     "market": instrument.market,
                     "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
                     "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
@@ -1175,7 +1213,7 @@ def collect_signals(
                         "industry": instrument.industry,
                         "product_category": card_product_category,
                         "exchange": instrument.exchange,
-                        "tradingview_symbol": f"{instrument.exchange}:{instrument.symbol}",
+                        "tradingview_symbol": tradingview_symbol_for(instrument),
                         "market": instrument.market,
                         "side": "buy",
                         "signal_type": "long_reclaim",
@@ -1226,7 +1264,7 @@ def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[
     # TradingView watchlist imports accept ticker lines only.  Product and
     # industry therefore define the deterministic line order rather than being
     # inserted as headings that would make the TXT fail to import.
-    market_order = {"台股": 0, "美股": 1, "幣安現貨": 2, "外匯": 3}
+    market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "外匯": 3}
     tradingview_entries: dict[str, dict] = {}
     for timeframe in frame_list:
         signals = timeframe.get("signals", []) if isinstance(timeframe, dict) else []
@@ -1262,8 +1300,8 @@ def write_payload(
 ) -> None:
     source = (
         "美股、台股與 Pepperstone 外匯 K 線：Yahoo Finance via yfinance；"
-        "台股監測清單：公開市場資料整理；幣安：24 小時成交額最高的 USDT 現貨交易對"
-        "（預設前 40 檔）與公開 K 線；Binance 加密 USDT 永續合約清單：Futures exchangeInfo 公開資料；"
+        "台股監測清單：公開市場資料整理；幣安：24 小時成交額最高的 USDT 永續合約"
+        "（預設前 200 檔）與 USDⓈ-M 公開 K 線；Binance 加密 USDT 永續合約清單：Futures exchangeInfo 公開資料；"
         "Pepperstone 外匯池：25 組高流動性、低點差優先貨幣對。"
     )
     if errors:

@@ -12,7 +12,8 @@ on:
 
 env:
   RECENT_SIGNAL_BARS: "8"
-  BINANCE_TOP_USDT_PAIRS: "40"
+  # Monitor the 200 highest 24-hour-notional Binance USDⓈ-M USDT perpetuals.
+  BINANCE_FUTURES_TOP_USDT_PERPETUALS: "200"
 
 permissions:
   contents: read
@@ -30,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     # Allow temporary upstream data-source slowness without killing a valid
     # scan before it reaches the Pages deployment step.
-    timeout-minutes: 25
+    timeout-minutes: 30
     environment:
       name: github-pages
     steps:
