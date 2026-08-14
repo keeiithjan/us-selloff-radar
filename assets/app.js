@@ -61,7 +61,10 @@ function formatMarketPrice(value, currency) {
 function formatSignalPrice(signal) {
   const value = Number(signal?.last_price);
   if (!Number.isFinite(value)) return "—";
-  if (signal?.market === "Pepperstone 外匯") {
+  if (
+    signal?.market === "Pepperstone CFD" &&
+    String(signal?.product_category || signal?.industry || "").includes("外匯")
+  ) {
     return value.toLocaleString("en-US", {
       minimumFractionDigits: value >= 20 ? 3 : 5,
       maximumFractionDigits: value >= 20 ? 3 : 5,
@@ -916,7 +919,7 @@ function tradingViewImportSymbol(signal) {
 }
 
 function exportSortKey(signal) {
-  const marketOrder = { "台股": 0, "美股": 1, "幣安 USDT 永續": 2, "外匯": 3 };
+  const marketOrder = { "台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3 };
   const product = String(signal.product_category || signal.industry || "其他");
   const industry = String(signal.industry || "");
   return [marketOrder[signal.market] ?? 99, product, industry, tradingViewImportSymbol(signal)];

@@ -37,6 +37,7 @@ TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
 TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TXT"
 BINANCE_CRYPTO_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Crypto-Perpetuals.TXT"
 BINANCE_STOCK_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Stock-Perpetuals.TXT"
+PEPPERSTONE_CFD_FILE = ROOT / "data" / "KJ-Pepperstone-Liquid-CFDs.TXT"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
@@ -203,37 +204,35 @@ class Instrument:
     industry: str | None = None
 
 
-# This is a deliberately small, liquid FX core instead of Pepperstone's full
-# 90+ pair catalogue.  It prioritises majors and actively traded crosses that
-# are practical for a low-spread trading workflow.  Quotes use Yahoo Finance's
-# public FX history while the card and TradingView export retain Pepperstone's
-# chart symbol.
-PEPPERSTONE_PAIR_SPECS: tuple[tuple[str, str, str], ...] = (
-    ("EURUSD=X", "EURUSD", "歐元／美元"),
-    ("JPY=X", "USDJPY", "美元／日圓"),
-    ("GBPUSD=X", "GBPUSD", "英鎊／美元"),
-    ("AUDUSD=X", "AUDUSD", "澳幣／美元"),
-    ("CAD=X", "USDCAD", "美元／加幣"),
-    ("CHF=X", "USDCHF", "美元／瑞郎"),
-    ("NZDUSD=X", "NZDUSD", "紐元／美元"),
-    ("EURJPY=X", "EURJPY", "歐元／日圓"),
-    ("EURGBP=X", "EURGBP", "歐元／英鎊"),
-    ("EURCHF=X", "EURCHF", "歐元／瑞郎"),
-    ("EURAUD=X", "EURAUD", "歐元／澳幣"),
-    ("EURCAD=X", "EURCAD", "歐元／加幣"),
-    ("GBPJPY=X", "GBPJPY", "英鎊／日圓"),
-    ("GBPCHF=X", "GBPCHF", "英鎊／瑞郎"),
-    ("GBPAUD=X", "GBPAUD", "英鎊／澳幣"),
-    ("GBPCAD=X", "GBPCAD", "英鎊／加幣"),
-    ("AUDJPY=X", "AUDJPY", "澳幣／日圓"),
-    ("AUDCAD=X", "AUDCAD", "澳幣／加幣"),
-    ("AUDNZD=X", "AUDNZD", "澳幣／紐元"),
-    ("CADJPY=X", "CADJPY", "加幣／日圓"),
-    ("CHFJPY=X", "CHFJPY", "瑞郎／日圓"),
-    ("NZDJPY=X", "NZDJPY", "紐元／日圓"),
-    ("NZDCHF=X", "NZDCHF", "紐元／瑞郎"),
-    ("EURNZD=X", "EURNZD", "歐元／紐元"),
-    ("GBPNZD=X", "GBPNZD", "英鎊／紐元"),
+# Pepperstone has no centralised CFD-volume feed.  This compact pool therefore
+# uses the most liquid underlying futures or cash-index proxy available from
+# Yahoo Finance for calculations, while keeping the matching Pepperstone
+# TradingView symbol for chart navigation.  It deliberately excludes long-tail
+# FX crosses: only metals, energy, headline equity indices and core FX pairs
+# remain.  Tuple fields: Yahoo proxy, Pepperstone chart symbol, Chinese name,
+# product-led category.
+PEPPERSTONE_CFD_SPECS: tuple[tuple[str, str, str, str], ...] = (
+    # Precious metals and energy
+    ("GC=F", "XAUUSD", "黃金現貨 CFD", "貴金屬｜黃金"),
+    ("SI=F", "XAGUSD", "白銀現貨 CFD", "貴金屬｜白銀"),
+    ("CL=F", "SPOTCRUDE", "美國原油 CFD", "能源｜美國原油（WTI）"),
+    ("BZ=F", "SPOTBRENT", "布蘭特原油 CFD", "能源｜布蘭特原油"),
+    # Liquid global equity-index benchmarks
+    ("ES=F", "US500", "S&P 500 CFD", "股價指數｜美國大型股（S&P 500）"),
+    ("NQ=F", "NAS100", "NASDAQ 100 CFD", "股價指數｜美國科技（NASDAQ 100）"),
+    ("YM=F", "US30", "道瓊工業指數 CFD", "股價指數｜美國藍籌（Dow 30）"),
+    ("RTY=F", "US2000", "Russell 2000 CFD", "股價指數｜美國小型股（Russell 2000）"),
+    ("NKD=F", "JPN225", "日經 225 CFD", "股價指數｜日本（日經 225）"),
+    ("^GDAXI", "GER40", "德國 40 CFD", "股價指數｜德國大型股（DAX 40）"),
+    # Core, high-turnover currency pairs only
+    ("EURUSD=X", "EURUSD", "歐元／美元", "主要外匯｜EUR/USD"),
+    ("JPY=X", "USDJPY", "美元／日圓", "主要外匯｜USD/JPY"),
+    ("GBPUSD=X", "GBPUSD", "英鎊／美元", "主要外匯｜GBP/USD"),
+    ("AUDUSD=X", "AUDUSD", "澳幣／美元", "主要外匯｜AUD/USD"),
+    ("CAD=X", "USDCAD", "美元／加幣", "主要外匯｜USD/CAD"),
+    ("CHF=X", "USDCHF", "美元／瑞郎", "主要外匯｜USD/CHF"),
+    ("NZDUSD=X", "NZDUSD", "紐元／美元", "主要外匯｜NZD/USD"),
+    ("EURJPY=X", "EURJPY", "歐元／日圓", "主要外匯｜EUR/JPY"),
 )
 
 
@@ -367,8 +366,8 @@ def product_category_for(
         return "產業分類：交易所未提供"
     if instrument.market == "幣安 USDT 永續":
         return "加密資產／USDT 永續"
-    if instrument.market == "Pepperstone 外匯":
-        return "高流動性外匯貨幣對"
+    if instrument.market == "Pepperstone CFD":
+        return instrument.industry or "Pepperstone 高流動性 CFD"
     return instrument.industry or "產業分類：交易所未提供"
 
 
@@ -469,18 +468,18 @@ def download_taiwan_records(
 
 
 def fetch_pepperstone_instruments() -> list[Instrument]:
-    """Return the 25-pair Pepperstone-focused FX monitoring pool."""
+    """Return the compact Pepperstone liquid-CFD monitoring pool."""
     return [
         Instrument(
             ticker,
             symbol,
             "PEPPERSTONE",
-            "Pepperstone 外匯",
+            "Pepperstone CFD",
             FX_SESSION,
             name,
-            "主要／次要外匯貨幣對",
+            category,
         )
-        for ticker, symbol, name in PEPPERSTONE_PAIR_SPECS
+        for ticker, symbol, name, category in PEPPERSTONE_CFD_SPECS
     ]
 
 
@@ -1264,7 +1263,7 @@ def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[
     # TradingView watchlist imports accept ticker lines only.  Product and
     # industry therefore define the deterministic line order rather than being
     # inserted as headings that would make the TXT fail to import.
-    market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "外匯": 3}
+    market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3}
     tradingview_entries: dict[str, dict] = {}
     for timeframe in frame_list:
         signals = timeframe.get("signals", []) if isinstance(timeframe, dict) else []
@@ -1299,10 +1298,11 @@ def write_payload(
     binance_crypto_perpetuals: list[str] | None = None,
 ) -> None:
     source = (
-        "美股、台股與 Pepperstone 外匯 K 線：Yahoo Finance via yfinance；"
+        "美股、台股與 Pepperstone CFD K 線：Yahoo Finance via yfinance；"
         "台股監測清單：公開市場資料整理；幣安：24 小時成交額最高的 USDT 永續合約"
         "（預設前 200 檔）與 USDⓈ-M 公開 K 線；Binance 加密 USDT 永續合約清單：Futures exchangeInfo 公開資料；"
-        "Pepperstone 外匯池：25 組高流動性、低點差優先貨幣對。"
+        "Pepperstone CFD 池：黃金、白銀、原油、主要股價指數與核心貨幣對；"
+        "技術計算採 Yahoo Finance 對應期貨／指數代理 K 線，非 Pepperstone CFD 成交量。"
     )
     if errors:
         source += " 本次部分來源未更新：" + "；".join(errors)
@@ -1349,6 +1349,17 @@ def write_payload(
     ]
     TAIWAN_PINE_SCREENER_FILE.write_text(
         "\n".join(ordered_taiwan_symbols) + ("\n" if ordered_taiwan_symbols else ""),
+        encoding="utf-8",
+    )
+    # A stable, non-signal-only Pepperstone universe for direct TradingView
+    # import.  This mirrors the monitoring pool so it remains useful even
+    # when none of the 18 products currently has a qualifying TD event.
+    pepperstone_symbols = [
+        tradingview_symbol_for(instrument)
+        for instrument in fetch_pepperstone_instruments()
+    ]
+    PEPPERSTONE_CFD_FILE.write_text(
+        "\n".join(pepperstone_symbols) + "\n",
         encoding="utf-8",
     )
     # Full live Binance crypto-perpetual universe. These are not signal-only
