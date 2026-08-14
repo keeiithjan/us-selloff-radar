@@ -3,12 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f5f0">
+    <meta name="theme-color" content="#060a12">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="KJ Radar">
     <title>KJ Radar System｜市場監測</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="assets/kj-radar-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/kj-radar-icon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260810-3">
+    <link rel="stylesheet" href="assets/styles.css?v=20260814-pwa1">
   </head>
   <body>
     <main class="shell">
@@ -19,7 +26,11 @@
           <p class="lede">TD Sequential 9／13 與趨勢帶監測，涵蓋 15 分鐘、1 小時與日線訊號；包含成交額前 200 檔 Binance USDT 永續合約。</p>
           <p class="hero-status"><span class="system-dot" aria-hidden="true"></span> SYSTEM ONLINE <b>LIVE FEED · 60S CHECK</b></p>
         </div>
-        <button id="refresh" class="refresh" type="button">更新畫面</button>
+        <div class="hero-actions">
+          <button id="install-app" class="install-app" type="button" hidden>安裝 App</button>
+          <button id="refresh" class="refresh" type="button">更新畫面</button>
+          <p id="install-app-note" class="install-app-note" aria-live="polite" hidden></p>
+        </div>
       </header>
 
       <section class="market-pulse" aria-labelledby="market-pulse-title">
@@ -124,6 +135,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260810-3"></script>
+    <script src="assets/app.js?v=20260814-pwa1"></script>
   </body>
 </html>

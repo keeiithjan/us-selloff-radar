@@ -1,5 +1,7 @@
 const elements = {
   refresh: document.querySelector("#refresh"),
+  installApp: document.querySelector("#install-app"),
+  installAppNote: document.querySelector("#install-app-note"),
   sequentialFrames: document.querySelector("#sequential-frames"),
   sequentialUpdated: document.querySelector("#sequential-updated"),
   sequentialSource: document.querySelector("#sequential-source"),
@@ -23,6 +25,7 @@ const elements = {
 let sequentialPayload = null;
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
+let deferredInstallPrompt = null;
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const motionState = {
   futures: new Map(),
@@ -1056,7 +1059,74 @@ async function refresh() {
   }
 }
 
+function setInstallNote(message) {
+  if (!elements.installAppNote) return;
+  elements.installAppNote.textContent = message;
+  elements.installAppNote.hidden = !message;
+}
+
+function isAppleMobile() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function isStandaloneApp() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function configureAppInstall() {
+  if (!elements.installApp) return;
+  if (isStandaloneApp()) {
+    elements.installApp.hidden = true;
+    setInstallNote("目前正以已安裝的 KJ Radar App 執行。");
+    return;
+  }
+  if (isAppleMobile()) {
+    elements.installApp.hidden = false;
+    elements.installApp.textContent = "加入主畫面";
+  }
+}
+
+async function installApp() {
+  if (!elements.installApp) return;
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    elements.installApp.hidden = true;
+    setInstallNote(choice.outcome === "accepted" ? "KJ Radar 正在安裝。" : "你可以稍後再按安裝 App。" );
+    return;
+  }
+  if (isAppleMobile()) {
+    setInstallNote("請按 Safari 的「分享」按鈕，選擇「加入主畫面」，即可安裝 KJ Radar。" );
+    return;
+  }
+  setInstallNote("請使用 Chrome 或 Edge 的瀏覽器選單，選擇「安裝 KJ Radar System」；符合安裝條件時按鈕會自動出現。" );
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).catch((error) => {
+      console.warn("KJ Radar App 離線功能初始化失敗", error);
+    });
+  });
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  if (elements.installApp && !isStandaloneApp()) {
+    elements.installApp.hidden = false;
+    elements.installApp.textContent = "安裝 App";
+  }
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  if (elements.installApp) elements.installApp.hidden = true;
+  setInstallNote("KJ Radar App 已安裝，可從裝置主畫面開啟。" );
+});
+
 elements.refresh.addEventListener("click", refresh);
+if (elements.installApp) elements.installApp.addEventListener("click", installApp);
 elements.sequentialMarket.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
@@ -1070,5 +1140,6 @@ elements.sequentialMomentum.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);
+configureAppInstall();
 refresh();
 setInterval(refresh, 60_000);

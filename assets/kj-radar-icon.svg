@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">KJ Radar System</title>
+  <desc id="desc">KJ 雷達應用程式圖示</desc>
+  <rect width="512" height="512" rx="110" fill="#060a12"/>
+  <circle cx="256" cy="256" r="172" fill="#0b1e2e" stroke="#36b9ff" stroke-width="10"/>
+  <circle cx="256" cy="256" r="112" fill="none" stroke="#20e0bf" stroke-width="8" stroke-dasharray="11 13" opacity=".85"/>
+  <path d="M256 256 383 139" fill="none" stroke="#7effdf" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="23" fill="#20e0bf"/>
+  <circle cx="383" cy="139" r="18" fill="#36b9ff"/>
+  <text x="256" y="406" fill="#edf8fb" font-family="Arial, sans-serif" font-size="82" font-weight="700" text-anchor="middle">KJ</text>
+</svg>

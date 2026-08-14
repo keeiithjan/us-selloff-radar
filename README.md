@@ -7,6 +7,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 - 全球期貨脈搏與可嵌入的 TradingView 即時行情帶
 - 美股 400 檔、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
 - 做多：趨勢帶下方死亡交叉後站回白線
+- 可安裝的 PWA App：Android／Chrome／Edge 使用「安裝 App」，iPhone／iPad 於 Safari 選「分享」→「加入主畫面」
 
 爆量急跌、台灣加權一小時技術圖、指標股盤前／夜盤異動介面與其 Actions 執行步驟均已移除。
 
@@ -40,5 +41,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 ## 更新與資料來源
 
 GitHub Actions 平日每 30 分鐘更新一次。行情資料主要來自 Yahoo Finance（透過 `yfinance`）、台灣證交所／櫃買中心公開公司基本資料、台灣期交所標的清單，以及 Binance 公開 K 線與成交資料。Pepperstone 商品池依其公開 CFD 商品建置；由於 CFD 沒有集中式成交量，流動性以對應期貨／現貨指數的市場深度作為代理，非 Pepperstone 自身成交量。
+
+GitHub Pages 負責 App 前端與 PWA 離線殼層；GitHub Actions 則是掃描後台，負責更新 `market.json` 與 `sequential.json` 後自動部署。App 每 60 秒重新讀取資料；離線時只顯示上次成功快取的資料。
 
 資料只供研究與監測，不構成投資建議或買賣訊號。

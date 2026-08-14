@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "KJ Radar System",
+  "short_name": "KJ Radar",
+  "description": "多市場 TD Sequential 與趨勢帶監測。",
+  "lang": "zh-Hant-TW",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#060a12",
+  "background_color": "#060a12",
+  "icons": [
+    {
+      "src": "assets/kj-radar-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
