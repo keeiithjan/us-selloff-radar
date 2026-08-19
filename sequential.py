@@ -162,9 +162,9 @@ TIMEFRAMES = (
 # wants the week's opening position and an intraweek drop/reclaim to count
 # before Friday's close, so it is collected outside the confirmed-TD frames.
 WEEKLY_RECLAIM_TIMEFRAME = Timeframe("1w", "週線", "1wk", "10y", "W", None)
-WEEKLY_WHITE_LENGTH = 50
 WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
+WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS = 30
 WEEKLY_OPEN_CLOSE_BONUS = 12
 WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT = 1.5
 WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS = 8
@@ -194,6 +194,10 @@ YELLOW_LOWER_EDGE_TOLERANCE_PCT = 0.001
 # A recovery signal is valid only when it occurs within 30 completed bars of a
 # white/yellow death cross that occurred below the Trend Trader ribbon.
 TREND_RECLAIM_DEATH_LOOKBACK_BARS = 30
+# A weekly recovery needs the AI Momentum white/yellow lines and the complete
+# EMA 50/100 ribbon.  This conservative minimum avoids emitting a signal from
+# an incompletely warmed-up weekly indicator.
+WEEKLY_AI_MINIMUM_BARS = max(TREND_RIBBON_SLOW_LENGTH, ZONE_INSIDE_LENGTH + KERNEL_LOOKBACK) + 2
 
 
 @dataclass(frozen=True)
@@ -1124,40 +1128,38 @@ def latest_day_change_pct(
 
 
 def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Calculate the Trend Trader white line on weekly OHLC bars.
+    """Calculate the user-supplied AI Momentum white/yellow weekly lines.
 
-    The supplied Trend Trader script uses an EMA 50 as its short/white line.
-    ``white_at_open`` replaces the current weekly close with its open so the
-    opening comparison is not distorted by the move that occurred afterwards.
+    ``white`` is AI Momentum's ``kernClose`` (the white line on the chart),
+    not Trend Trader's EMA 50. ``yellow`` is that indicator's ``zoneMid``.
+    The opening reference is the *previous completed week's* white line; this
+    prevents the current week's closing move from rewriting its open test.
     """
-    columns = ["open", "high", "low", "close", "white", "white_at_open"]
+    columns = [
+        "open", "high", "low", "close", "white", "yellow",
+        "trend_lower_edge", "white_at_open",
+    ]
     if not {"Open", "High", "Low", "Close"}.issubset(frame.columns):
         return pd.DataFrame(index=frame.index, columns=columns)
+    source = frame.copy()
+    # White/yellow calculations do not depend on volume. Some Yahoo proxies
+    # used for CFD contracts omit it, so provide a harmless placeholder.
+    if "Volume" not in source.columns:
+        source["Volume"] = 1.0
+    momentum = ai_momentum_features(source)
     open_price = pd.to_numeric(frame["Open"], errors="coerce")
     high = pd.to_numeric(frame["High"], errors="coerce")
     low = pd.to_numeric(frame["Low"], errors="coerce")
-    close = pd.to_numeric(frame["Close"], errors="coerce")
-    white = close.ewm(
-        span=WEEKLY_WHITE_LENGTH,
-        adjust=False,
-        min_periods=WEEKLY_WHITE_LENGTH,
-    ).mean()
-    close_at_open = close.copy()
-    if not close_at_open.empty:
-        close_at_open.iloc[-1] = open_price.iloc[-1]
-    white_at_open = close_at_open.ewm(
-        span=WEEKLY_WHITE_LENGTH,
-        adjust=False,
-        min_periods=WEEKLY_WHITE_LENGTH,
-    ).mean()
     return pd.DataFrame(
         {
             "open": open_price,
             "high": high,
             "low": low,
-            "close": close,
-            "white": white,
-            "white_at_open": white_at_open,
+            "close": momentum["close"],
+            "white": momentum["white_kernel"],
+            "yellow": momentum["yellow_mid"],
+            "trend_lower_edge": momentum["trend_lower_edge"],
+            "white_at_open": momentum["white_kernel"].shift(1),
         },
         index=frame.index,
     )
@@ -1166,14 +1168,15 @@ def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
 def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     """Return the active long-only weekly white-line recovery.
 
-    A valid setup needs a *weekly body* below the EMA 50 white line, followed
-    by a close back above it within the next three weeks.  The priority setup
-    is the *first* recovery week: it opens above white, dips below it during
-    the week, then closes back above it.  The second and third weeks may stay
-    visible as lower-priority follow-through, but they cannot become the
-    direct-focus setup themselves.
+    A valid setup needs a weekly close below the AI Momentum white line after
+    its white/yellow death cross below the Trend Trader ribbon, followed by a
+    close back above the same AI white line within the next three weeks. The
+    priority setup is the *first* recovery week: it opens above the prior
+    confirmed white line, dips below it during the week, then closes back
+    above the current AI white line. The second and third weeks may stay
+    visible as lower-priority follow-through, but cannot become direct-focus.
     """
-    if len(features) < WEEKLY_WHITE_LENGTH + 2:
+    if len(features) < WEEKLY_AI_MINIMUM_BARS:
         return None
     latest = len(features) - 1
     last = features.iloc[latest]
@@ -1220,8 +1223,38 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
             # is a reclaim, not a breakdown.  Require the *weekly close* to
             # remain below white before arming a later weekly recovery.
             closed_below_white = float(broken["close"]) < broken_white - broken_tolerance
-            if closed_below_white:
-                selected = {"break_position": break_position, "reclaim_position": reclaim_position}
+            if not closed_below_white:
+                continue
+            death_cross_position: int | None = None
+            death_start = max(1, break_position - WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS)
+            for death_position in range(break_position, death_start - 1, -1):
+                death = features.iloc[death_position]
+                prior_death = features.iloc[death_position - 1]
+                death_values = (
+                    death["white"], death["yellow"], death["trend_lower_edge"],
+                    prior_death["white"], prior_death["yellow"],
+                )
+                if not all(np.isfinite(float(value)) for value in death_values):
+                    continue
+                death_white = float(death["white"])
+                death_yellow = float(death["yellow"])
+                death_lower_edge = float(death["trend_lower_edge"])
+                death_tolerance = max(abs(death_white) * 0.0005, 0.01)
+                ribbon_tolerance = max(abs(death_lower_edge) * 0.0005, 0.01)
+                crossed_down = (
+                    float(prior_death["white"]) >= float(prior_death["yellow"]) - death_tolerance
+                    and death_white < death_yellow - death_tolerance
+                )
+                below_ribbon = max(death_white, death_yellow) < death_lower_edge - ribbon_tolerance
+                if crossed_down and below_ribbon:
+                    death_cross_position = death_position
+                    break
+            if death_cross_position is not None:
+                selected = {
+                    "break_position": break_position,
+                    "reclaim_position": reclaim_position,
+                    "death_cross_position": death_cross_position,
+                }
                 break
         if selected:
             break
@@ -1635,7 +1668,7 @@ def collect_weekly_reclaims(
 
     for instrument, raw in records:
         frame = raw.dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
-        if len(frame) < WEEKLY_WHITE_LENGTH + 2:
+        if len(frame) < WEEKLY_AI_MINIMUM_BARS:
             continue
         scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
         weekly_white = weekly_white_features(frame)
@@ -1646,6 +1679,7 @@ def collect_weekly_reclaims(
         product_category = product_category_for(instrument, public_profile_cache)
         reclaim_position = int(event["reclaim_position"])
         break_position = int(event["break_position"])
+        death_cross_position = int(event["death_cross_position"])
         sparkline, sparkline_signal_index = signal_sparkline(frame, reclaim_position, maximum_bars=26)
         sparkline_start = max(0, len(frame) - 26)
         signal = {
@@ -1663,11 +1697,20 @@ def collect_weekly_reclaims(
                 "last_price": round(float(frame["Close"].iloc[-1]), 8),
                 "week_change_pct": latest_day_change_pct(frame, timeframe, instrument.session),
                 "break_time": format_weekly_bar_time(frame.index[break_position], instrument.session),
+                "death_cross_time": format_weekly_bar_time(
+                    frame.index[death_cross_position], instrument.session
+                ),
+                "death_cross_weeks_before_break": break_position - death_cross_position,
                 "reclaim_time": format_weekly_bar_time(frame.index[reclaim_position], instrument.session),
                 "sparkline": sparkline,
                 "sparkline_signal_index": sparkline_signal_index,
                 "sparkline_break_index": (
                     break_position - sparkline_start if break_position >= sparkline_start else None
+                ),
+                "sparkline_death_index": (
+                    death_cross_position - sparkline_start
+                    if death_cross_position >= sparkline_start
+                    else None
                 ),
                 **event,
                 **weekly_ai_status,
@@ -1730,7 +1773,7 @@ def collect_weekly_reclaims(
         "key": timeframe.key,
         "label": timeframe.label,
         "tradingview_interval": timeframe.tradingview_interval,
-        "white_line_definition": f"Trend Trader EMA {WEEKLY_WHITE_LENGTH}",
+        "white_line_definition": "AI Momentum kernClose（白線）",
         "lookback_weeks": WEEKLY_RECLAIM_LOOKBACK_WEEKS,
         "visible_weeks": WEEKLY_RECLAIM_VISIBLE_WEEKS,
         "scanned_symbols": sum(scanned_by_market.values()),

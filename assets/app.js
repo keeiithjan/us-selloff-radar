@@ -980,13 +980,13 @@ function makeWeeklyReclaimSignal(signal, interval) {
 
   const timeline = document.createElement("p");
   timeline.className = "weekly-reclaim-timeline";
-  timeline.textContent = `實體跌破：${signal.break_time || "資料不足"}　→　收回：${signal.reclaim_time || "資料不足"}`;
+  timeline.textContent = `白黃死亡交叉：${signal.death_cross_time || "資料不足"}　→　週K收盤跌破白線：${signal.break_time || "資料不足"}　→　收回：${signal.reclaim_time || "資料不足"}`;
 
   const stateList = document.createElement("div");
   stateList.className = "weekly-reclaim-states";
   const baseState = document.createElement("span");
   baseState.textContent = age === 0
-    ? "第一根收復週K｜目前收盤仍在 EMA 50 白線上方"
+    ? "第一根收復週K｜目前收盤仍在 AI Momentum 白線上方"
     : `收復後第 ${age} 週｜僅延續追蹤，不給週K加分`;
   stateList.append(baseState);
   if (signal.first_week_pullback_reclaim) {
@@ -1042,7 +1042,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const hourlyStatus = signal.hourly_status_available
     ? `1H：${signal.hourly_above_white ? "已站上" : "未站上"}白線（${signedPercent(hourlyDistance)}）`
     : "1H：資料暫缺";
-  whiteStatus.textContent = `白線狀況｜首週：${firstBehavior}（開盤 ${signedPercent(firstOpenDistance)}）｜本週：開盤 ${signedPercent(currentOpenDistance)}、收盤 ${signedPercent(currentCloseDistance)}｜${hourlyStatus}`;
+  whiteStatus.textContent = `AI 白線狀況｜首週：${firstBehavior}（開盤 ${signedPercent(firstOpenDistance)}）｜本週：開盤 ${signedPercent(currentOpenDistance)}、收盤 ${signedPercent(currentCloseDistance)}｜${hourlyStatus}`;
   if (signal.hourly_status_available) {
     const hourly = document.createElement("span");
     hourly.className = signal.hourly_above_white ? "bonus" : "hourly-pending";
@@ -1076,9 +1076,9 @@ function makeWeeklyReclaimSignal(signal, interval) {
     .filter(Number.isFinite);
   const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
   const sparkline = makeSparkline(signal.sparkline, direction, true, {
-    title: "週線近 26 週走勢；橘點為實體跌破白線，藍點為收盤站回白線",
+    title: "週線近 26 週走勢；橘點為白線／黃線死亡交叉，藍點為收盤站回 AI 白線",
     markers: [
-      { index: signal.sparkline_break_index, kind: "death", label: "跌破白線" },
+      { index: signal.sparkline_death_index, kind: "death", label: "白黃死叉" },
       { index: signal.sparkline_signal_index, kind: "signal", label: "收回白線" },
     ],
   });
@@ -1089,7 +1089,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const hourlyValues = signal.hourly_status_available
     ? ` ｜ 1H C ${plainQuote(signal.hourly_close)} / 白線 ${plainQuote(signal.hourly_white_line)}`
     : "";
-  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}${hourlyValues}`;
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}`;
 
   card.append(top, details, timeline, stateList, whiteStatus, weeklyAiStatus);
   if (sparkline) card.append(sparkline);
