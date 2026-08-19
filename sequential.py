@@ -170,6 +170,7 @@ WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT = 1.5
 WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS = 8
 HOURLY_WHITE_ABOVE_BONUS = 15
 HOURLY_SECOND_RECLAIM_BONUS = 35
+HOURLY_SECOND_RECLAIM_RECENCY_BARS = 4
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -1296,6 +1297,8 @@ def _weekly_hourly_state_unavailable() -> dict[str, object]:
         "hourly_above_white": False,
         "hourly_reclaim_count": 0,
         "hourly_second_reclaim": False,
+        "hourly_second_reclaim_bars_ago": None,
+        "hourly_second_reclaim_within_four_bars": False,
         "hourly_last_reclaim_time": None,
         "hourly_bar_time": None,
         "hourly_close": None,
@@ -1363,11 +1366,23 @@ def hourly_state_since_weekly_reclaim(
     latest_tolerance = max(abs(hourly_white) * 0.0005, 0.01)
     above_white = hourly_close > hourly_white + latest_tolerance
     last_reclaim_position = reclaim_positions[-1] if reclaim_positions else None
+    second_reclaim_bars_ago = (
+        len(features) - 1 - last_reclaim_position
+        if len(reclaim_positions) >= 2 and last_reclaim_position is not None
+        else None
+    )
+    second_reclaim_within_four_bars = bool(
+        above_white
+        and second_reclaim_bars_ago is not None
+        and second_reclaim_bars_ago <= HOURLY_SECOND_RECLAIM_RECENCY_BARS
+    )
     return {
         "hourly_status_available": True,
         "hourly_above_white": above_white,
         "hourly_reclaim_count": len(reclaim_positions),
         "hourly_second_reclaim": bool(above_white and len(reclaim_positions) >= 2),
+        "hourly_second_reclaim_bars_ago": second_reclaim_bars_ago,
+        "hourly_second_reclaim_within_four_bars": second_reclaim_within_four_bars,
         "hourly_last_reclaim_time": (
             format_bar_time(features.index[last_reclaim_position], hourly_timeframe, session)
             if last_reclaim_position is not None
@@ -1633,14 +1648,18 @@ def collect_weekly_reclaims(
         signal.update(hourly_state)
         if bool(hourly_state["hourly_above_white"]):
             signal["score"] = int(signal["score"]) + HOURLY_WHITE_ABOVE_BONUS
-        if bool(hourly_state["hourly_second_reclaim"]):
+        if bool(
+            signal["first_week_is_current"]
+            and signal["first_week_pullback_reclaim"]
+            and hourly_state["hourly_second_reclaim_within_four_bars"]
+        ):
             signal["score"] = int(signal["score"]) + HOURLY_SECOND_RECLAIM_BONUS
         signal["direct_focus"] = bool(
             signal["week_white_structure_active"]
             and signal["first_week_is_current"]
             and signal["first_week_pullback_reclaim"]
             and hourly_state["hourly_above_white"]
-            and hourly_state["hourly_second_reclaim"]
+            and hourly_state["hourly_second_reclaim_within_four_bars"]
         )
 
     signals.sort(

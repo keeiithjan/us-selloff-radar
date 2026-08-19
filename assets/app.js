@@ -13,6 +13,7 @@ const elements = {
   tradingViewExportNote: document.querySelector("#tradingview-export-note"),
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
   weeklyReclaimSignals: document.querySelector("#weekly-reclaim-signals"),
+  weeklyReclaimFilter: document.querySelector("#weekly-reclaim-filter"),
   weeklyReclaimExportNote: document.querySelector("#weekly-reclaim-export-note"),
   downloadWeeklyTradingViewList: document.querySelector("#download-weekly-tradingview-list"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
@@ -910,10 +911,20 @@ function plainQuote(value) {
 
 function filteredWeeklyReclaims(frame) {
   const selectedMarket = elements.sequentialMarket.value;
+  const selectedFilter = elements.weeklyReclaimFilter?.value || "score";
   const signals = Array.isArray(frame?.signals) ? frame.signals : [];
   return signals
     .filter((signal) => signal.side === "buy" && signal.signal_type === "weekly_white_reclaim")
     .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .filter((signal) => {
+      if (selectedFilter === "first-week") {
+        return Boolean(signal.first_week_is_current && signal.first_week_pullback_reclaim);
+      }
+      if (selectedFilter === "hourly-second-four") {
+        return Boolean(signal.hourly_second_reclaim_within_four_bars);
+      }
+      return true;
+    })
     .sort((left, right) => {
       const scoreGap = Number(right.score || 0) - Number(left.score || 0);
       if (scoreGap) return scoreGap;
@@ -1018,10 +1029,16 @@ function makeWeeklyReclaimSignal(signal, interval) {
     stateList.append(hourly);
     if (Number(signal.hourly_reclaim_count || 0) > 0) {
       const hourlyCount = document.createElement("span");
-      hourlyCount.className = signal.hourly_second_reclaim ? "direct-focus-state" : "";
-      hourlyCount.textContent = signal.hourly_second_reclaim
-        ? `1 小時第 ${Number(signal.hourly_reclaim_count)} 次站回 ＋35・直接關注`
-        : `1 小時已站回 ${Number(signal.hourly_reclaim_count)} 次`;
+      const secondWithinFour = Boolean(signal.hourly_second_reclaim_within_four_bars);
+      const firstWeekFocus = Boolean(signal.first_week_is_current && signal.first_week_pullback_reclaim);
+      hourlyCount.className = secondWithinFour && firstWeekFocus ? "direct-focus-state" : "hourly-pending";
+      hourlyCount.textContent = secondWithinFour && firstWeekFocus
+        ? `1 小時第 ${Number(signal.hourly_reclaim_count)} 次站回（${Number(signal.hourly_second_reclaim_bars_ago)} 根K內）＋35`
+        : secondWithinFour
+          ? `1 小時第 ${Number(signal.hourly_reclaim_count)} 次站回（${Number(signal.hourly_second_reclaim_bars_ago)} 根K內）；非第一週，不加大分`
+        : signal.hourly_second_reclaim
+          ? `1 小時第 ${Number(signal.hourly_reclaim_count)} 次站回已超過 4 根K，不加分`
+          : `1 小時已站回 ${Number(signal.hourly_reclaim_count)} 次`;
       stateList.append(hourlyCount);
     }
   } else {
@@ -1357,6 +1374,11 @@ elements.sequentialSide.addEventListener("change", () => {
 elements.sequentialMomentum.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
+if (elements.weeklyReclaimFilter) {
+  elements.weeklyReclaimFilter.addEventListener("change", () => {
+    if (sequentialPayload) renderWeeklyReclaims(sequentialPayload);
+  });
+}
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);
 if (elements.downloadWeeklyTradingViewList) {
   elements.downloadWeeklyTradingViewList.addEventListener("click", downloadWeeklyTradingViewList);
