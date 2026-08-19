@@ -988,6 +988,23 @@ function makeWeeklyReclaimSignal(signal, interval) {
     opening.textContent = "第一根週K開盤、收盤在白線上方 ＋12";
     stateList.append(opening);
   }
+  if (signal.second_week_near_white_open) {
+    const secondWeek = document.createElement("span");
+    secondWeek.className = "bonus";
+    secondWeek.textContent = `第 2 根週K開盤在白線上方、距白線 ${Number(signal.week_open_distance_pct || 0).toFixed(2)}% ＋8`;
+    stateList.append(secondWeek);
+  }
+
+  const whiteStatus = document.createElement("p");
+  whiteStatus.className = "weekly-white-status";
+  const firstOpenDistance = Number(signal.first_week_open_distance_pct);
+  const currentOpenDistance = Number(signal.week_open_distance_pct);
+  const currentCloseDistance = Number(signal.week_close_distance_pct);
+  const signedPercent = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "資料不足";
+  const firstBehavior = signal.first_week_pullback_reclaim
+    ? "開盤在上方→盤中跌破→收回"
+    : signal.first_week_open_above_white ? "開盤在白線上方" : "開盤未站上白線";
+  whiteStatus.textContent = `白線狀況｜首週：${firstBehavior}（開盤 ${signedPercent(firstOpenDistance)}）｜本週：開盤 ${signedPercent(currentOpenDistance)}、收盤 ${signedPercent(currentCloseDistance)}`;
   if (signal.hourly_status_available) {
     const hourly = document.createElement("span");
     hourly.className = signal.hourly_above_white ? "bonus" : "hourly-pending";
@@ -1030,7 +1047,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
     : "";
   valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}${hourlyValues}`;
 
-  card.append(top, details, timeline, stateList);
+  card.append(top, details, timeline, stateList, whiteStatus);
   if (sparkline) card.append(sparkline);
   card.append(valuesText, makeTradingViewLink(signal, interval));
   return card;

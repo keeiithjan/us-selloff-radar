@@ -604,6 +604,7 @@ h2 { margin-bottom: 8px; color: #f1fbff; font-family: "Noto Serif TC", "Songti T
 .weekly-reclaim-states .strong-bonus { border-color: rgb(245 193 78 / 44%); background: rgb(245 193 78 / 12%); color: #ffe29c; }
 .weekly-reclaim-states .hourly-pending { border-color: rgb(146 162 185 / 30%); background: rgb(146 162 185 / 8%); color: #b5c2d5; }
 .weekly-reclaim-states .direct-focus-state { border-color: rgb(119 255 224 / 70%); background: rgb(15 253 196 / 18%); color: #a8ffec; }
+.weekly-white-status { margin: 10px 0 0; padding: 8px 9px; border-left: 2px solid rgb(148 191 255 / 62%); background: rgb(111 151 216 / 8%); color: #cad8ed; font-family: "DM Mono", "SFMono-Regular", Consolas, monospace; font-size: .67rem; font-weight: 650; line-height: 1.6; }
 .weekly-reclaim-values { margin: 8px 0 11px; color: var(--muted); font-family: "DM Mono", "SFMono-Regular", Consolas, monospace; font-size: .68rem; line-height: 1.55; }
 .weekly-reclaim-signal .tv-link { margin-top: 2px; }
 

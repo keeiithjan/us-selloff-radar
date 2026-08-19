@@ -166,6 +166,8 @@ WEEKLY_WHITE_LENGTH = 50
 WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
 WEEKLY_OPEN_CLOSE_BONUS = 12
+WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT = 1.5
+WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS = 8
 HOURLY_WHITE_ABOVE_BONUS = 15
 HOURLY_SECOND_RECLAIM_BONUS = 35
 
@@ -1223,6 +1225,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
 
     reclaim_position = selected["reclaim_position"]
     reclaim = features.iloc[reclaim_position]
+    reclaim_values = (
+        reclaim["open"], reclaim["low"], reclaim["close"], reclaim["white"], reclaim["white_at_open"],
+    )
+    if not all(np.isfinite(float(value)) for value in reclaim_values):
+        return None
     reclaim_white = float(reclaim["white"])
     reclaim_white_at_open = float(reclaim["white_at_open"])
     reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
@@ -1234,6 +1241,9 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         first_week_open_above and first_week_dipped_below and first_week_closed_above
     )
     age_weeks = latest - reclaim_position
+    first_week_open_distance_pct = (float(reclaim["open"]) / reclaim_white_at_open - 1) * 100
+    week_open_distance_pct = (float(last["open"]) / white_at_open - 1) * 100
+    week_close_distance_pct = (float(last["close"]) / last_white - 1) * 100
     week_dipped_below = float(last["low"]) < last_white - tolerance
     week_reclaimed = bool(
         age_weeks == 0 and week_open_above and week_dipped_below and week_close_above
@@ -1244,6 +1254,14 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         score += WEEKLY_OPEN_CLOSE_BONUS
     if age_weeks == 0 and first_week_pullback_reclaim:
         score += 20
+    second_week_near_white_open = bool(
+        age_weeks == 1
+        and first_week_open_above
+        and week_open_above
+        and week_open_distance_pct <= WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT
+    )
+    if second_week_near_white_open:
+        score += WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS
     return {
         **selected,
         "weeks_to_reclaim": weeks_to_reclaim,
@@ -1257,6 +1275,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         "first_week_open_above_white": first_week_open_above,
         "first_week_dipped_below_white": first_week_dipped_below,
         "first_week_pullback_reclaim": first_week_pullback_reclaim,
+        "first_week_open_distance_pct": round(first_week_open_distance_pct, 4),
+        "week_open_distance_pct": round(week_open_distance_pct, 4),
+        "week_close_distance_pct": round(week_close_distance_pct, 4),
+        "second_week_near_white_open": second_week_near_white_open,
+        "second_week_near_white_threshold_pct": WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT,
         "week_open": round(float(last["open"]), 8),
         "week_low": round(float(last["low"]), 8),
         "week_close": round(float(last["close"]), 8),
