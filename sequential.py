@@ -1244,6 +1244,12 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     first_week_pullback_reclaim = bool(
         first_week_open_above and first_week_dipped_below and first_week_closed_above
     )
+    # The requested setup is not a generic close cross from below.  Its first
+    # recovery week must begin above white, test below it intraweek, and close
+    # back above it.  This excludes cases such as TPR opening below the line
+    # and merely crossing it later in the week.
+    if not first_week_pullback_reclaim:
+        return None
     age_weeks = latest - reclaim_position
     first_week_open_distance_pct = (float(reclaim["open"]) / reclaim_white_at_open - 1) * 100
     week_open_distance_pct = (float(last["open"]) / white_at_open - 1) * 100

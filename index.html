@@ -142,7 +142,7 @@
               <button id="download-weekly-tradingview-list" class="download-list" type="button">匯出週線 TradingView 清單 .TXT</button>
             </div>
           </div>
-          <p class="sequential-note">白線採 Trend Trader EMA 50。週K只有收盤仍在白線下方才算實體跌破；由下往上收回白線的週K不會誤判為跌破。收盤站回後最多追蹤 3 週。最高權重只給第一根收復週K：開盤在白線上方、盤中跌破白線後收回。第 2 根若同樣開在白線上方且距白線不超過 1.5%，給小幅延續加分；第 3 根不給週K加分。下拉篩選可選分數排名、剛收腳至白線上、或 1H 4根完成K棒內第2次站回。只有第一根週K才會因最後一項取得大加分與「直接關注」。</p>
+          <p class="sequential-note">白線採 Trend Trader EMA 50。週K只有收盤仍在白線下方才算實體跌破；由下往上收回白線的週K不會誤判為跌破。第一根收復週K必須完整符合：開盤在白線上方、盤中跌破白線、收盤收回白線上方；單純由白線下方往上穿越的週K不列入。收盤站回後最多追蹤 3 週。第 2 根若同樣開在白線上方且距白線不超過 1.5%，給小幅延續加分；第 3 根不給週K加分。下拉篩選可選分數排名、剛收腳至白線上、或 1H 4根完成K棒內第2次站回。只有第一根週K才會因最後一項取得大加分與「直接關注」。</p>
           <p id="weekly-reclaim-export-note" class="tradingview-export-note"></p>
           <p class="pinescreener-note"><a class="pinescreener-link" href="data/KJ-Radar-Weekly-White-Reclaim.TXT" download>下載最新週線白線收復清單 .TXT</a><span>後台掃描完成後自動更新；亦可依目前市場篩選使用上方按鈕匯出。</span></p>
           <div id="weekly-reclaim-signals" class="weekly-reclaim-signals" aria-live="polite"></div>
@@ -157,6 +157,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260819-weekly9"></script>
+    <script src="assets/app.js?v=20260819-weekly10"></script>
   </body>
 </html>
