@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260819-weekly8">
+    <link rel="stylesheet" href="assets/styles.css?v=20260819-pressure1">
   </head>
   <body>
     <main class="shell">
@@ -125,6 +125,16 @@
           <p class="sequential-note">僅做多，監測 15 分鐘與 1 小時：從死亡交叉到回站期間，K 棒實體（開盤與收盤）、AI Momentum 白線與黃線必須全程都在 TT（EMA 50／100）趨勢帶下方；任一根實體進入趨勢帶即作廢。其後 30 根完成 K 棒內，收盤由下往上站回白線，且白線仍在黃線下方。訊號後 8 根完成 K 棒內的回站訊號才會顯示。</p>
           <div id="trend-reclaim-frames" class="trend-reclaim-frames" aria-live="polite"></div>
         </div>
+        <section class="pressure-band-monitor" aria-labelledby="pressure-band-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">RIBBON PRESSURE OBSERVATION</p>
+              <h3 id="pressure-band-title">大黑K壓 Trend Trader 趨勢帶｜獨立觀察</h3>
+            </div>
+          </div>
+          <p class="sequential-note">獨立於 TD 與白線收復。掃描 15 分鐘與 1 小時：黑K實體至少為近 20 根中位實體的 1.6 倍、且至少 1 倍 ATR(14)，實體必須接觸 EMA 50／100 趨勢帶，並收在帶的下緣或更低。這是客觀的價格壓力型態，不推論交易意圖。</p>
+          <div id="pressure-band-frames" class="pressure-band-frames" aria-live="polite"></div>
+        </section>
         <section class="weekly-reclaim-monitor" aria-labelledby="weekly-reclaim-title">
           <div class="section-heading weekly-reclaim-heading">
             <div>
@@ -158,6 +168,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260819-weekly12"></script>
+    <script src="assets/app.js?v=20260819-pressure1"></script>
   </body>
 </html>

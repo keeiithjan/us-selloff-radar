@@ -12,6 +12,7 @@ const elements = {
   downloadTradingViewList: document.querySelector("#download-tradingview-list"),
   tradingViewExportNote: document.querySelector("#tradingview-export-note"),
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
+  pressureBandFrames: document.querySelector("#pressure-band-frames"),
   weeklyReclaimSignals: document.querySelector("#weekly-reclaim-signals"),
   weeklyReclaimFilter: document.querySelector("#weekly-reclaim-filter"),
   weeklyReclaimExportNote: document.querySelector("#weekly-reclaim-export-note"),
@@ -900,6 +901,105 @@ function renderTrendReclaims(frames) {
   elements.trendReclaimFrames.replaceChildren(...eligibleFrames.map(makeTrendReclaimTimeframe));
 }
 
+function filteredPressureBandSignals(frame) {
+  const selectedMarket = elements.sequentialMarket.value;
+  const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
+  const signals = (Array.isArray(frame.pressure_band_signals) ? frame.pressure_band_signals : [])
+    .filter((signal) => signal.side === "sell" && signal.signal_type === "large_bearish_ribbon_pressure")
+    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket);
+  return signals.sort((left, right) => multiplier * (
+    Date.parse(left.occurred_at_utc || 0) - Date.parse(right.occurred_at_utc || 0)
+  ));
+}
+
+function makePressureBandSignal(signal, interval) {
+  const card = document.createElement("article");
+  card.className = "pressure-band-signal";
+  const top = document.createElement("div");
+  top.className = "alert-top";
+  const heading = document.createElement("div");
+  const ticker = document.createElement("h4");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const status = document.createElement("p");
+  status.className = "pressure-band-status";
+  status.textContent = Number(signal.age_bars) === 0
+    ? "大黑K壓帶｜最新完成 K 棒"
+    : `大黑K壓帶｜${Number(signal.age_bars)} 根 K 棒前`;
+  heading.append(ticker, status);
+
+  const quote = document.createElement("div");
+  quote.className = "signal-quote";
+  const price = document.createElement("strong");
+  price.className = "signal-price";
+  price.textContent = formatSignalPrice(signal);
+  quote.append(price);
+  const todayChange = makeTodayChange(signal.today_change_pct);
+  if (todayChange) quote.append(todayChange);
+  top.append(heading, quote);
+
+  const details = document.createElement("div");
+  details.className = "signal-details";
+  const industry = document.createElement("span");
+  industry.textContent = industryText(signal);
+  const occurred = document.createElement("span");
+  occurred.textContent = `產生時間：${signal.bar_time_et || "資料不足"}`;
+  details.append(industry, occurred);
+
+  const rule = document.createElement("p");
+  rule.className = "pressure-band-rule";
+  rule.textContent = `${signal.pattern || "大黑K壓帶"}｜實體 ${Number(signal.body_vs_median || 0).toFixed(2)}× 近20K中位｜${Number(signal.body_vs_atr || 0).toFixed(2)}× ATR(14)`;
+
+  const values = document.createElement("p");
+  values.className = "pressure-band-values";
+  values.textContent = `O ${plainQuote(signal.open_price)} ／ C ${plainQuote(signal.close_price)} ｜ TT 帶 ${plainQuote(signal.ribbon_lower)}–${plainQuote(signal.ribbon_upper)} ｜收盤相對下緣 ${formatSigned(signal.close_vs_lower_pct)}%`;
+
+  const series = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
+    .map(Number)
+    .filter(Number.isFinite);
+  const direction = series.length >= 2 && series.at(-1) < series[0] ? "down" : "up";
+  const sparkline = makeSparkline(signal.sparkline, direction, true, {
+    title: "最近 30 根已完成 K 棒走勢；橘點為大黑K壓帶",
+    markers: [{ index: signal.sparkline_signal_index, kind: "death", label: "壓帶" }],
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
+  card.append(top, details, rule);
+  if (sparkline) card.append(sparkline);
+  card.append(values, makeTradingViewLink(signal, interval));
+  return card;
+}
+
+function makePressureBandTimeframe(frame) {
+  const panel = document.createElement("section");
+  panel.className = "pressure-band-timeframe";
+  const signals = filteredPressureBandSignals(frame);
+  const header = document.createElement("div");
+  header.className = "timeframe-header";
+  const title = document.createElement("h4");
+  title.textContent = frame.label || frame.key;
+  const count = document.createElement("span");
+  count.textContent = `最近 ${Number(frame.recent_bars || 8)} 根：${signals.length} 個`;
+  header.append(title, count);
+  panel.append(header);
+  if (signals.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "timeframe-empty";
+    empty.textContent = "目前沒有符合大黑K壓 Trend Trader 趨勢帶的型態。";
+    panel.append(empty);
+    return panel;
+  }
+  const list = document.createElement("div");
+  list.className = "sequential-signals";
+  for (const signal of signals) list.append(makePressureBandSignal(signal, frame.tradingview_interval));
+  panel.append(list);
+  return panel;
+}
+
+function renderPressureBandSignals(frames) {
+  if (!elements.pressureBandFrames) return;
+  const eligibleFrames = frames.filter((frame) => ["15m", "1h"].includes(frame.key));
+  elements.pressureBandFrames.replaceChildren(...eligibleFrames.map(makePressureBandTimeframe));
+}
+
 function plainQuote(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "資料不足";
@@ -1280,6 +1380,7 @@ function renderSequential(payload) {
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   renderTrendReclaims(frames);
+  renderPressureBandSignals(frames);
   renderWeeklyReclaims(payload);
   elements.sequentialUpdated.textContent = payload.updated_at_utc
     ? `資料更新：${formatTaipei(payload.updated_at_utc)}`

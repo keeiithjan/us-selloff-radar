@@ -194,6 +194,15 @@ YELLOW_LOWER_EDGE_TOLERANCE_PCT = 0.001
 # A recovery signal is valid only when it occurs within 30 completed bars of a
 # white/yellow death cross that occurred below the Trend Trader ribbon.
 TREND_RECLAIM_DEATH_LOOKBACK_BARS = 30
+# Independent large-bearish-candle / Trend Trader ribbon observation module.
+# These are deliberately moderate first-pass thresholds so the user can
+# validate the visual pattern before deciding whether to merge it into another
+# setup or tighten the rule.
+PRESSURE_BODY_MEDIAN_LENGTH = 20
+PRESSURE_ATR_LENGTH = 14
+PRESSURE_BODY_MEDIAN_MULTIPLIER = 1.6
+PRESSURE_BODY_ATR_MULTIPLIER = 1.0
+PRESSURE_RIBBON_TOLERANCE_PCT = 0.0025
 # A weekly recovery needs the AI Momentum white/yellow lines and the complete
 # EMA 50/100 ribbon.  This conservative minimum avoids emitting a signal from
 # an incompletely warmed-up weekly indicator.
@@ -948,6 +957,91 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
     return events
 
 
+def trend_band_pressure_events(
+    frame: pd.DataFrame, features: pd.DataFrame | None
+) -> list[dict[str, object]]:
+    """Find large bearish bodies pressing through the Trend Trader ribbon.
+
+    This is an observation-only pattern, not an inference about market intent.
+    A bar must be bearish, at least 1.6 times its 20-bar median real body and
+    at least one ATR(14). Its body must touch the EMA 50/100 ribbon and finish
+    at or below the lower edge. A full open-above / close-below pass is tagged
+    separately as a ribbon-through press.
+    """
+    if (
+        features is None
+        or not {"Open", "High", "Low", "Close"}.issubset(frame.columns)
+        or not {"trend_lower_edge", "trend_upper_edge"}.issubset(features.columns)
+    ):
+        return []
+    if len(frame) < max(PRESSURE_BODY_MEDIAN_LENGTH, PRESSURE_ATR_LENGTH) + 1:
+        return []
+    high = pd.to_numeric(frame["High"], errors="coerce")
+    low = pd.to_numeric(frame["Low"], errors="coerce")
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    open_price = pd.to_numeric(frame["Open"], errors="coerce")
+    previous_close = close.shift(1)
+    true_range = pd.concat(
+        [
+            high - low,
+            (high - previous_close).abs(),
+            (low - previous_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr = true_range.rolling(PRESSURE_ATR_LENGTH, min_periods=PRESSURE_ATR_LENGTH).mean()
+    body = (open_price - close).abs()
+    median_body = body.rolling(
+        PRESSURE_BODY_MEDIAN_LENGTH,
+        min_periods=PRESSURE_BODY_MEDIAN_LENGTH,
+    ).median()
+    events: list[dict[str, object]] = []
+    for position in range(1, len(frame)):
+        row = features.iloc[position]
+        values = (
+            open_price.iloc[position], close.iloc[position], body.iloc[position],
+            median_body.iloc[position], atr.iloc[position],
+            row["trend_lower_edge"], row["trend_upper_edge"],
+        )
+        if not all(np.isfinite(float(value)) for value in values):
+            continue
+        open_value = float(open_price.iloc[position])
+        close_value = float(close.iloc[position])
+        body_value = float(body.iloc[position])
+        median_value = float(median_body.iloc[position])
+        atr_value = float(atr.iloc[position])
+        if median_value <= 0 or atr_value <= 0:
+            continue
+        lower = float(row["trend_lower_edge"])
+        upper = float(row["trend_upper_edge"])
+        tolerance = max(abs(lower) * PRESSURE_RIBBON_TOLERANCE_PCT, 0.01)
+        body_top = max(open_value, close_value)
+        body_bottom = min(open_value, close_value)
+        bearish = close_value < open_value
+        large_body = (
+            body_value >= median_value * PRESSURE_BODY_MEDIAN_MULTIPLIER
+            and body_value >= atr_value * PRESSURE_BODY_ATR_MULTIPLIER
+        )
+        touches_ribbon = body_top >= lower - tolerance and body_bottom <= upper + tolerance
+        closes_at_or_below_lower = close_value <= lower + tolerance
+        if not (bearish and large_body and touches_ribbon and closes_at_or_below_lower):
+            continue
+        presses_through = open_value >= upper - tolerance and close_value <= lower + tolerance
+        events.append(
+            {
+                "position": position,
+                "pattern": "實體貫穿趨勢帶" if presses_through else "大黑K壓在趨勢帶下緣",
+                "body_size": round(body_value, 8),
+                "body_vs_median": round(body_value / median_value, 4),
+                "body_vs_atr": round(body_value / atr_value, 4),
+                "ribbon_lower": round(lower, 8),
+                "ribbon_upper": round(upper, 8),
+                "close_vs_lower_pct": round((close_value / lower - 1) * 100, 4),
+            }
+        )
+    return events
+
+
 def momentum_confirmation(
     features: pd.DataFrame | None,
     position: int,
@@ -1504,6 +1598,7 @@ def collect_signals(
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
     trend_reclaim_signals: list[dict[str, object]] = []
+    pressure_band_signals: list[dict[str, object]] = []
     taiwan_universe: dict[str, dict[str, str]] = {}
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
@@ -1549,6 +1644,43 @@ def collect_signals(
         # comparison.  The stricter bearish-Momentum confirmation remains a
         # 15-minute / one-hour filter only.
         features = ai_momentum_features(frame)
+        if timeframe.key in MOMENTUM_TIMEFRAME_KEYS:
+            recent_pressure_events = [
+                event
+                for event in trend_band_pressure_events(frame, features)
+                if len(frame) - 1 - int(event["position"]) <= recent_bars
+            ]
+            # One latest pressure card per symbol/timeframe keeps this module
+            # usable as an observation board instead of duplicating a selloff.
+            if recent_pressure_events:
+                if card_product_category is None:
+                    card_product_category = product_category_for(instrument, public_profile_cache)
+                event = recent_pressure_events[-1]
+                position = int(event["position"])
+                sparkline, sparkline_signal_index = signal_sparkline(frame, position)
+                pressure_band_signals.append(
+                    {
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": card_product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol_for(instrument),
+                        "market": instrument.market,
+                        "side": "sell",
+                        "signal_type": "large_bearish_ribbon_pressure",
+                        "bar_time_et": format_bar_time(frame.index[position], timeframe, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(frame.index[position], instrument.session),
+                        "age_bars": len(frame) - 1 - position,
+                        "last_price": round(float(frame["Close"].iloc[position]), 8),
+                        "today_change_pct": today_change_pct,
+                        "open_price": round(float(frame["Open"].iloc[position]), 8),
+                        "close_price": round(float(frame["Close"].iloc[position]), 8),
+                        "sparkline": sparkline,
+                        "sparkline_signal_index": sparkline_signal_index,
+                        **event,
+                    }
+                )
         for event in recent_events:
             position = int(event["position"])
             age_bars = len(frame) - 1 - position
@@ -1626,6 +1758,7 @@ def collect_signals(
 
     signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
     trend_reclaim_signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
+    pressure_band_signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -1636,6 +1769,7 @@ def collect_signals(
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
         "trend_reclaim_signals": trend_reclaim_signals,
+        "pressure_band_signals": pressure_band_signals,
         "taiwan_pine_screener_universe": sorted(
             taiwan_universe.values(),
             key=lambda item: (
