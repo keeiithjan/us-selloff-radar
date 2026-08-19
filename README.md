@@ -5,7 +5,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 ## 保留的首頁模組
 
 - 全球期貨脈搏與可嵌入的 TradingView 即時行情帶
-- 美股 400 檔、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
+- 美股 500 檔（跨能源、公用事業、工業國防、核能與原物料、潔淨能源、金融科技、跨國消費、汽車運輸、軟體與醫療等類別）、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
 - 做多：趨勢帶下方死亡交叉後站回白線
 - 週線白線收復：週線實體跌破 Trend Trader EMA 50 白線後，最多三週內收盤站回；本週開盤高於白線加分，若本週開高、盤中跌破再收回則額外加分
 - 可安裝的 PWA App：Android／Chrome／Edge 使用「安裝 App」，iPhone／iPad 於 Safari 選「分享」→「加入主畫面」
