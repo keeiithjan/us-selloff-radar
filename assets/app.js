@@ -1004,7 +1004,11 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const firstBehavior = signal.first_week_pullback_reclaim
     ? "開盤在上方→盤中跌破→收回"
     : signal.first_week_open_above_white ? "開盤在白線上方" : "開盤未站上白線";
-  whiteStatus.textContent = `白線狀況｜首週：${firstBehavior}（開盤 ${signedPercent(firstOpenDistance)}）｜本週：開盤 ${signedPercent(currentOpenDistance)}、收盤 ${signedPercent(currentCloseDistance)}`;
+  const hourlyDistance = Number(signal.hourly_white_distance_pct);
+  const hourlyStatus = signal.hourly_status_available
+    ? `1H：${signal.hourly_above_white ? "已站上" : "未站上"}白線（${signedPercent(hourlyDistance)}）`
+    : "1H：資料暫缺";
+  whiteStatus.textContent = `白線狀況｜首週：${firstBehavior}（開盤 ${signedPercent(firstOpenDistance)}）｜本週：開盤 ${signedPercent(currentOpenDistance)}、收盤 ${signedPercent(currentCloseDistance)}｜${hourlyStatus}`;
   if (signal.hourly_status_available) {
     const hourly = document.createElement("span");
     hourly.className = signal.hourly_above_white ? "bonus" : "hourly-pending";

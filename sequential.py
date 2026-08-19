@@ -1300,6 +1300,7 @@ def _weekly_hourly_state_unavailable() -> dict[str, object]:
         "hourly_bar_time": None,
         "hourly_close": None,
         "hourly_white_line": None,
+        "hourly_white_distance_pct": None,
     }
 
 
@@ -1375,6 +1376,7 @@ def hourly_state_since_weekly_reclaim(
         "hourly_bar_time": format_bar_time(features.index[-1], hourly_timeframe, session),
         "hourly_close": round(hourly_close, 8),
         "hourly_white_line": round(hourly_white, 8),
+        "hourly_white_distance_pct": round((hourly_close / hourly_white - 1) * 100, 4),
     }
 
 
