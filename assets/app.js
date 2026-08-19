@@ -923,7 +923,8 @@ function filteredWeeklyReclaims(frame) {
 
 function makeWeeklyReclaimSignal(signal, interval) {
   const card = document.createElement("article");
-  card.className = "weekly-reclaim-signal";
+  const directFocus = Boolean(signal.direct_focus);
+  card.className = `weekly-reclaim-signal${directFocus ? " is-direct-focus" : ""}`;
 
   const top = document.createElement("div");
   top.className = "alert-top";
@@ -944,6 +945,12 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const weekChange = makeTodayChange(signal.week_change_pct, "本週漲跌");
   quote.append(price);
   if (weekChange) quote.append(weekChange);
+  if (directFocus) {
+    const focusLight = document.createElement("span");
+    focusLight.className = "direct-focus-light";
+    focusLight.innerHTML = '<i aria-hidden="true"></i>直接關注';
+    quote.append(focusLight);
+  }
   top.append(heading, quote);
 
   const details = document.createElement("div");
@@ -964,19 +971,34 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const stateList = document.createElement("div");
   stateList.className = "weekly-reclaim-states";
   const baseState = document.createElement("span");
-  baseState.textContent = "週線收盤已站回 EMA 50 白線";
+  baseState.textContent = "週K開盤、收盤皆在 EMA 50 白線上方";
   stateList.append(baseState);
-  if (signal.week_open_above_white) {
-    const opening = document.createElement("span");
-    opening.className = "bonus";
-    opening.textContent = "本週開盤在白線上方 ＋12";
-    stateList.append(opening);
-  }
   if (signal.week_reclaimed_white) {
     const intrweek = document.createElement("span");
     intrweek.className = "strong-bonus";
     intrweek.textContent = "本週開高→盤中跌破→收回白線 ＋20";
     stateList.append(intrweek);
+  }
+  if (signal.hourly_status_available) {
+    const hourly = document.createElement("span");
+    hourly.className = signal.hourly_above_white ? "bonus" : "hourly-pending";
+    hourly.textContent = signal.hourly_above_white
+      ? "1 小時同步站上白線 ＋15"
+      : "1 小時尚未站上白線";
+    stateList.append(hourly);
+    if (Number(signal.hourly_reclaim_count || 0) > 0) {
+      const hourlyCount = document.createElement("span");
+      hourlyCount.className = signal.hourly_second_reclaim ? "direct-focus-state" : "";
+      hourlyCount.textContent = signal.hourly_second_reclaim
+        ? `1 小時第 ${Number(signal.hourly_reclaim_count)} 次站回 ＋35・直接關注`
+        : `1 小時已站回 ${Number(signal.hourly_reclaim_count)} 次`;
+      stateList.append(hourlyCount);
+    }
+  } else {
+    const hourlyUnavailable = document.createElement("span");
+    hourlyUnavailable.className = "hourly-pending";
+    hourlyUnavailable.textContent = "1 小時資料暫缺";
+    stateList.append(hourlyUnavailable);
   }
 
   const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
@@ -994,7 +1016,10 @@ function makeWeeklyReclaimSignal(signal, interval) {
 
   const valuesText = document.createElement("p");
   valuesText.className = "weekly-reclaim-values";
-  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}`;
+  const hourlyValues = signal.hourly_status_available
+    ? ` ｜ 1H C ${plainQuote(signal.hourly_close)} / 白線 ${plainQuote(signal.hourly_white_line)}`
+    : "";
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}${hourlyValues}`;
 
   card.append(top, details, timeline, stateList);
   if (sparkline) card.append(sparkline);

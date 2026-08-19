@@ -165,6 +165,9 @@ WEEKLY_RECLAIM_TIMEFRAME = Timeframe("1w", "週線", "1wk", "10y", "W", None)
 WEEKLY_WHITE_LENGTH = 50
 WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
+WEEKLY_OPEN_CLOSE_BONUS = 12
+HOURLY_WHITE_ABOVE_BONUS = 15
+HOURLY_SECOND_RECLAIM_BONUS = 35
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -859,6 +862,7 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(
         {
+            "open": open_price,
             "close": close,
             "white_kernel": kernel_close,
             "yellow_mid": yellow_mid,
@@ -875,11 +879,12 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
     """Find a long-only reclaim after a death cross below the ribbon.
 
     White is AI Momentum's ``kernClose`` and yellow is its ``zoneMid``.  The
-    death-cross candle, white line, and yellow line must *all* be below the
-    lower EMA 50/100 ribbon edge.  They must remain below that edge throughout
-    the setup; re-entering the ribbon invalidates the pending setup.  A long
-    reclaim needs a completed close to cross above white while white remains
-    below yellow.  This function never emits a short signal.
+    death-cross candle *body* (both open and close), white line, and yellow
+    line must all be below the lower EMA 50/100 ribbon edge.  They must remain
+    below that edge throughout the setup; a candle body re-entering the ribbon
+    invalidates the pending setup.  A long reclaim needs a completed close to
+    cross above white while white remains below yellow.  This function never
+    emits a short signal.
     """
     if features is None or len(features) < 2:
         return []
@@ -890,6 +895,7 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
         row = features.iloc[position]
         previous = features.iloc[position - 1]
         values = (
+            row["open"],
             row["close"],
             row["white_kernel"],
             row["yellow_mid"],
@@ -907,8 +913,13 @@ def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
         prior_yellow = float(previous["yellow_mid"])
         close = float(row["close"])
         prior_close = float(previous["close"])
+        open_price = float(row["open"])
         lower_edge = float(row["trend_lower_edge"])
-        fully_below_ribbon = max(close, white, yellow) < lower_edge
+        # A close-only comparison produced false positives when a candle
+        # opened inside/above the ribbon and merely closed below it.  The user
+        # requires an actual body below the ribbon before the death cross can
+        # arm a later long reclaim.
+        fully_below_ribbon = max(open_price, close, white, yellow) < lower_edge
         is_death_cross = prior_white >= prior_yellow and white < yellow
         if is_death_cross and fully_below_ribbon:
             active_death_cross = position
@@ -1152,11 +1163,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     """Return the active long-only weekly white-line recovery.
 
     A valid setup needs a *weekly body* below the EMA 50 white line, followed
-    by a close back above it within the next three weeks.  The current week's
-    OHLC is intentionally included: opening above the white line adds score,
-    while opening above, trading below it, and recovering the close adds a
-    larger score.  The latter is a live weekly condition and becomes final only
-    when the week closes.
+    by a close back above it within the next three weeks.  For an active card,
+    the current weekly candle must open above the white line *at the opening*
+    and still close above the current white line.  A weekly lower wick alone
+    never qualifies it.  Opening above, dipping under the line, and recovering
+    the close is retained as an extra live-strength condition.
     """
     if len(features) < WEEKLY_WHITE_LENGTH + 2:
         return None
@@ -1166,8 +1177,14 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     if not all(np.isfinite(float(value)) for value in required):
         return None
     last_white = float(last["white"])
+    white_at_open = float(last["white_at_open"])
     tolerance = max(abs(last_white) * 0.0005, 0.01)
-    if float(last["close"]) <= last_white + tolerance:
+    open_tolerance = max(abs(white_at_open) * 0.0005, 0.01)
+    week_open_above = float(last["open"]) > white_at_open + open_tolerance
+    week_close_above = float(last["close"]) > last_white + tolerance
+    # This monitor is an active watchlist, not a historical archive.  A card
+    # must be holding the current weekly structure at both the open and close.
+    if not (week_open_above and week_close_above):
         return None
 
     first_reclaim = max(1, latest - WEEKLY_RECLAIM_VISIBLE_WEEKS)
@@ -1203,13 +1220,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     if selected is None:
         return None
 
-    week_open_above = float(last["open"]) > float(last["white_at_open"]) + tolerance
     week_dipped_below = float(last["low"]) < last_white - tolerance
-    week_reclaimed = bool(week_open_above and week_dipped_below and float(last["close"]) > last_white + tolerance)
+    week_reclaimed = bool(week_open_above and week_dipped_below and week_close_above)
     weeks_to_reclaim = selected["reclaim_position"] - selected["break_position"]
     score = 50 + {1: 20, 2: 12, 3: 5}.get(weeks_to_reclaim, 0)
-    if week_open_above:
-        score += 12
+    score += WEEKLY_OPEN_CLOSE_BONUS
     if week_reclaimed:
         score += 20
     return {
@@ -1217,14 +1232,105 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         "weeks_to_reclaim": weeks_to_reclaim,
         "age_weeks": latest - selected["reclaim_position"],
         "week_open_above_white": week_open_above,
+        "week_close_above_white": week_close_above,
+        "week_white_structure_active": True,
         "week_dipped_below_white": week_dipped_below,
         "week_reclaimed_white": week_reclaimed,
         "week_open": round(float(last["open"]), 8),
         "week_low": round(float(last["low"]), 8),
         "week_close": round(float(last["close"]), 8),
         "white_line": round(last_white, 8),
-        "white_at_open": round(float(last["white_at_open"]), 8),
+        "white_at_open": round(white_at_open, 8),
         "score": score,
+    }
+
+
+def _weekly_hourly_state_unavailable() -> dict[str, object]:
+    """Use explicit fields when a current weekly candidate lacks 1h data."""
+    return {
+        "hourly_status_available": False,
+        "hourly_above_white": False,
+        "hourly_reclaim_count": 0,
+        "hourly_second_reclaim": False,
+        "hourly_last_reclaim_time": None,
+        "hourly_bar_time": None,
+        "hourly_close": None,
+        "hourly_white_line": None,
+    }
+
+
+def _timestamp_in_session(index_value: object, session: MarketSession) -> pd.Timestamp:
+    timestamp = pd.Timestamp(index_value)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize(session.timezone)
+    return timestamp.tz_convert(session.timezone)
+
+
+def hourly_state_since_weekly_reclaim(
+    raw: pd.DataFrame,
+    session: MarketSession,
+    weekly_reclaim_index: object,
+    now: datetime,
+) -> dict[str, object]:
+    """Return the live hourly white-line state after the weekly reclaim.
+
+    ``刷上去第二次`` is deliberately counted as actual hourly close cross-ups
+    from at/below the white line to above it, starting with the week that
+    produced the weekly reclaim.  Merely remaining above white does not inflate
+    this count.
+    """
+    unavailable = _weekly_hourly_state_unavailable()
+    hourly_timeframe = next(item for item in TIMEFRAMES if item.key == "1h")
+    frame = confirmed_bars(raw, hourly_timeframe, session, now)
+    if len(frame) < TREND_RIBBON_FAST_LENGTH + 2:
+        return unavailable
+    features = ai_momentum_features(frame)
+    if features.empty or len(features) < 2:
+        return unavailable
+
+    anchor = _timestamp_in_session(weekly_reclaim_index, session)
+    timestamps = [_timestamp_in_session(value, session) for value in features.index]
+    reclaim_positions: list[int] = []
+    for position in range(1, len(features)):
+        if timestamps[position] < anchor:
+            continue
+        row = features.iloc[position]
+        previous = features.iloc[position - 1]
+        values = (row["close"], row["white_kernel"], previous["close"], previous["white_kernel"])
+        if not all(np.isfinite(float(value)) for value in values):
+            continue
+        white = float(row["white_kernel"])
+        prior_white = float(previous["white_kernel"])
+        tolerance = max(abs(white) * 0.0005, 0.01)
+        crossed_up = (
+            float(previous["close"]) <= prior_white + tolerance
+            and float(row["close"]) > white + tolerance
+        )
+        if crossed_up:
+            reclaim_positions.append(position)
+
+    latest = features.iloc[-1]
+    latest_values = (latest["close"], latest["white_kernel"])
+    if not all(np.isfinite(float(value)) for value in latest_values):
+        return unavailable
+    hourly_close = float(latest["close"])
+    hourly_white = float(latest["white_kernel"])
+    latest_tolerance = max(abs(hourly_white) * 0.0005, 0.01)
+    above_white = hourly_close > hourly_white + latest_tolerance
+    last_reclaim_position = reclaim_positions[-1] if reclaim_positions else None
+    return {
+        "hourly_status_available": True,
+        "hourly_above_white": above_white,
+        "hourly_reclaim_count": len(reclaim_positions),
+        "hourly_second_reclaim": bool(above_white and len(reclaim_positions) >= 2),
+        "hourly_last_reclaim_time": (
+            format_bar_time(features.index[last_reclaim_position], hourly_timeframe, session)
+            if last_reclaim_position is not None
+            else None
+        ),
+        "hourly_bar_time": format_bar_time(features.index[-1], hourly_timeframe, session),
+        "hourly_close": round(hourly_close, 8),
+        "hourly_white_line": round(hourly_white, 8),
     }
 
 
@@ -1410,6 +1516,7 @@ def collect_weekly_reclaims(
     records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
+    weekly_candidates: list[tuple[dict[str, object], Instrument, object]] = []
     scanned_by_market: dict[str, int] = {}
 
     for instrument, raw in records:
@@ -1425,8 +1532,7 @@ def collect_weekly_reclaims(
         break_position = int(event["break_position"])
         sparkline, sparkline_signal_index = signal_sparkline(frame, reclaim_position, maximum_bars=26)
         sparkline_start = max(0, len(frame) - 26)
-        signals.append(
-            {
+        signal = {
                 "symbol": instrument.symbol,
                 "name": instrument.name,
                 "industry": instrument.industry,
@@ -1449,10 +1555,49 @@ def collect_weekly_reclaims(
                 ),
                 **event,
             }
+        signals.append(signal)
+        # Keep the raw weekly bar index only in memory.  It anchors the
+        # hourly "first/second stand back above white" count to this weekly
+        # recovery rather than to an arbitrary trailing number of hours.
+        weekly_candidates.append((signal, instrument, frame.index[reclaim_position]))
+
+    hourly_timeframe = next(item for item in TIMEFRAMES if item.key == "1h")
+    yahoo_hourly_candidates = [
+        instrument
+        for _, instrument, _ in weekly_candidates
+        if instrument.market != "幣安 USDT 永續"
+    ]
+    binance_hourly_candidates = [
+        instrument
+        for _, instrument, _ in weekly_candidates
+        if instrument.market == "幣安 USDT 永續"
+    ]
+    hourly_records = download_yahoo_records(yahoo_hourly_candidates, hourly_timeframe)
+    hourly_records.extend(download_binance_records(binance_hourly_candidates, hourly_timeframe))
+    hourly_by_ticker = {instrument.ticker: raw for instrument, raw in hourly_records}
+    for signal, instrument, weekly_reclaim_index in weekly_candidates:
+        hourly_raw = hourly_by_ticker.get(instrument.ticker)
+        hourly_state = (
+            hourly_state_since_weekly_reclaim(
+                hourly_raw, instrument.session, weekly_reclaim_index, now
+            )
+            if hourly_raw is not None
+            else _weekly_hourly_state_unavailable()
+        )
+        signal.update(hourly_state)
+        if bool(hourly_state["hourly_above_white"]):
+            signal["score"] = int(signal["score"]) + HOURLY_WHITE_ABOVE_BONUS
+        if bool(hourly_state["hourly_second_reclaim"]):
+            signal["score"] = int(signal["score"]) + HOURLY_SECOND_RECLAIM_BONUS
+        signal["direct_focus"] = bool(
+            signal["week_white_structure_active"]
+            and hourly_state["hourly_above_white"]
+            and hourly_state["hourly_second_reclaim"]
         )
 
     signals.sort(
         key=lambda item: (
+            not bool(item.get("direct_focus")),
             -int(item["score"]),
             str(item["market"]),
             str(item["tradingview_symbol"]),
