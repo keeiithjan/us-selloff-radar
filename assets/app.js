@@ -923,6 +923,9 @@ function filteredWeeklyReclaims(frame) {
       if (selectedFilter === "hourly-second-four") {
         return Boolean(signal.hourly_second_reclaim_within_four_bars);
       }
+      if (selectedFilter === "golden-cross") {
+        return Boolean(signal.weekly_ai_golden_cross);
+      }
       return true;
     })
     .sort((left, right) => {
@@ -1006,6 +1009,26 @@ function makeWeeklyReclaimSignal(signal, interval) {
     stateList.append(secondWeek);
   }
 
+  const weeklyAiStatus = document.createElement("p");
+  weeklyAiStatus.className = "weekly-white-status weekly-ai-status";
+  if (signal.weekly_ai_white_yellow_available) {
+    const crossAge = Number(signal.weekly_ai_golden_cross_weeks_ago);
+    const crossAgeText = crossAge === 0 ? "\u672c\u9031\u5b8c\u6210" : `${crossAge} \u9031\u524d\u5b8c\u6210`;
+    if (signal.weekly_ai_golden_cross) {
+      weeklyAiStatus.textContent = `\u9031K AI \u767d\u7dda\u91d1\u53c9\u9ec3\u7dda\uff1a${crossAgeText}\uff08\u53ea\u4fdd\u7559\u6700\u8fd1 4 \u9031\u8a0a\u865f\uff09`;
+      const goldenCross = document.createElement("span");
+      goldenCross.className = "strong-bonus";
+      goldenCross.textContent = `\u9031K AI \u767d\u7dda\u91d1\u53c9\u9ec3\u7dda\uff1a${crossAgeText}`;
+      stateList.append(goldenCross);
+    } else if (signal.weekly_ai_white_above_yellow) {
+      weeklyAiStatus.textContent = "\u9031K AI \u767d\u7dda\u5728\u9ec3\u7dda\u4e0a\u65b9\uff0c\u4f46\u6700\u8fd1 4 \u9031\u672a\u91d1\u53c9";
+    } else {
+      weeklyAiStatus.textContent = "\u9031K AI \u767d\u7dda\u4ecd\u5728\u9ec3\u7dda\u4e0b\u65b9";
+    }
+  } else {
+    weeklyAiStatus.textContent = "\u9031K AI \u767d\u3001\u9ec3\u7dda\u8cc7\u6599\u4e0d\u8db3";
+  }
+
   const whiteStatus = document.createElement("p");
   whiteStatus.className = "weekly-white-status";
   const firstOpenDistance = Number(signal.first_week_open_distance_pct);
@@ -1068,7 +1091,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
     : "";
   valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}${hourlyValues}`;
 
-  card.append(top, details, timeline, stateList, whiteStatus);
+  card.append(top, details, timeline, stateList, whiteStatus, weeklyAiStatus);
   if (sparkline) card.append(sparkline);
   card.append(valuesText, makeTradingViewLink(signal, interval));
   return card;

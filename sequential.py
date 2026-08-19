@@ -168,6 +168,7 @@ WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
 WEEKLY_OPEN_CLOSE_BONUS = 12
 WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT = 1.5
 WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS = 8
+WEEKLY_GOLDEN_CROSS_LOOKBACK_WEEKS = 4
 HOURLY_WHITE_ABOVE_BONUS = 15
 HOURLY_SECOND_RECLAIM_BONUS = 35
 HOURLY_SECOND_RECLAIM_RECENCY_BARS = 4
@@ -1316,6 +1317,49 @@ def _weekly_hourly_state_unavailable() -> dict[str, object]:
     }
 
 
+def weekly_white_yellow_status(features: pd.DataFrame | None) -> dict[str, object]:
+    """Describe the current/recent weekly AI-Momentum white-yellow relation."""
+    unavailable: dict[str, object] = {
+        "weekly_ai_white_yellow_available": False,
+        "weekly_ai_white_above_yellow": False,
+        "weekly_ai_golden_cross": False,
+        "weekly_ai_golden_cross_weeks_ago": None,
+        "weekly_ai_white": None,
+        "weekly_ai_yellow": None,
+    }
+    if features is None or len(features) < 2:
+        return unavailable
+    latest = features.iloc[-1]
+    values = (latest["white_kernel"], latest["yellow_mid"])
+    if not all(np.isfinite(float(value)) for value in values):
+        return unavailable
+    white = float(latest["white_kernel"])
+    yellow = float(latest["yellow_mid"])
+    cross_positions: list[int] = []
+    start = max(1, len(features) - WEEKLY_GOLDEN_CROSS_LOOKBACK_WEEKS)
+    for position in range(start, len(features)):
+        row = features.iloc[position]
+        previous = features.iloc[position - 1]
+        pair = (
+            row["white_kernel"], row["yellow_mid"],
+            previous["white_kernel"], previous["yellow_mid"],
+        )
+        if not all(np.isfinite(float(value)) for value in pair):
+            continue
+        if float(previous["white_kernel"]) <= float(previous["yellow_mid"]) and float(row["white_kernel"]) > float(row["yellow_mid"]):
+            cross_positions.append(position)
+    last_cross = cross_positions[-1] if cross_positions else None
+    is_above = white > yellow
+    return {
+        "weekly_ai_white_yellow_available": True,
+        "weekly_ai_white_above_yellow": is_above,
+        "weekly_ai_golden_cross": bool(is_above and last_cross is not None),
+        "weekly_ai_golden_cross_weeks_ago": len(features) - 1 - last_cross if last_cross is not None else None,
+        "weekly_ai_white": round(white, 8),
+        "weekly_ai_yellow": round(yellow, 8),
+    }
+
+
 def _timestamp_in_session(index_value: object, session: MarketSession) -> pd.Timestamp:
     timestamp = pd.Timestamp(index_value)
     if timestamp.tzinfo is None:
@@ -1594,9 +1638,11 @@ def collect_weekly_reclaims(
         if len(frame) < WEEKLY_WHITE_LENGTH + 2:
             continue
         scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
-        event = weekly_reclaim_event(weekly_white_features(frame))
+        weekly_white = weekly_white_features(frame)
+        event = weekly_reclaim_event(weekly_white)
         if event is None:
             continue
+        weekly_ai_status = weekly_white_yellow_status(ai_momentum_features(frame))
         product_category = product_category_for(instrument, public_profile_cache)
         reclaim_position = int(event["reclaim_position"])
         break_position = int(event["break_position"])
@@ -1624,6 +1670,7 @@ def collect_weekly_reclaims(
                     break_position - sparkline_start if break_position >= sparkline_start else None
                 ),
                 **event,
+                **weekly_ai_status,
             }
         signals.append(signal)
         # Keep the raw weekly bar index only in memory.  It anchors the
