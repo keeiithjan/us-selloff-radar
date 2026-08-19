@@ -1215,8 +1215,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
                 continue
             broken_white = float(broken["white"])
             broken_tolerance = max(abs(broken_white) * 0.0005, 0.01)
-            body_below_white = min(float(broken["open"]), float(broken["close"])) < broken_white - broken_tolerance
-            if body_below_white:
+            # A bullish week can open below the line and finish above it.  It
+            # is a reclaim, not a breakdown.  Require the *weekly close* to
+            # remain below white before arming a later weekly recovery.
+            closed_below_white = float(broken["close"]) < broken_white - broken_tolerance
+            if closed_below_white:
                 selected = {"break_position": break_position, "reclaim_position": reclaim_position}
                 break
         if selected:
