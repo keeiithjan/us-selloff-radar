@@ -34,6 +34,7 @@ from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_sessi
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
 TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
+WEEKLY_RECLAIM_EXPORT_FILE = ROOT / "data" / "KJ-Radar-Weekly-White-Reclaim.TXT"
 TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TXT"
 BINANCE_CRYPTO_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Crypto-Perpetuals.TXT"
 BINANCE_STOCK_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Stock-Perpetuals.TXT"
@@ -156,6 +157,14 @@ TIMEFRAMES = (
     Timeframe("1h", "1 小時", "1h", "1y", "60", timedelta(hours=1)),
     Timeframe("1d", "日線", "1d", "2y", "D", None),
 )
+
+# This monitor deliberately keeps the current, still-forming week.  The user
+# wants the week's opening position and an intraweek drop/reclaim to count
+# before Friday's close, so it is collected outside the confirmed-TD frames.
+WEEKLY_RECLAIM_TIMEFRAME = Timeframe("1w", "週線", "1wk", "10y", "W", None)
+WEEKLY_WHITE_LENGTH = 50
+WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
+WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -1099,6 +1108,133 @@ def latest_day_change_pct(
     return round((latest_close / prior_close - 1) * 100, 4)
 
 
+def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Calculate the Trend Trader white line on weekly OHLC bars.
+
+    The supplied Trend Trader script uses an EMA 50 as its short/white line.
+    ``white_at_open`` replaces the current weekly close with its open so the
+    opening comparison is not distorted by the move that occurred afterwards.
+    """
+    columns = ["open", "high", "low", "close", "white", "white_at_open"]
+    if not {"Open", "High", "Low", "Close"}.issubset(frame.columns):
+        return pd.DataFrame(index=frame.index, columns=columns)
+    open_price = pd.to_numeric(frame["Open"], errors="coerce")
+    high = pd.to_numeric(frame["High"], errors="coerce")
+    low = pd.to_numeric(frame["Low"], errors="coerce")
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    white = close.ewm(
+        span=WEEKLY_WHITE_LENGTH,
+        adjust=False,
+        min_periods=WEEKLY_WHITE_LENGTH,
+    ).mean()
+    close_at_open = close.copy()
+    if not close_at_open.empty:
+        close_at_open.iloc[-1] = open_price.iloc[-1]
+    white_at_open = close_at_open.ewm(
+        span=WEEKLY_WHITE_LENGTH,
+        adjust=False,
+        min_periods=WEEKLY_WHITE_LENGTH,
+    ).mean()
+    return pd.DataFrame(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "white": white,
+            "white_at_open": white_at_open,
+        },
+        index=frame.index,
+    )
+
+
+def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
+    """Return the active long-only weekly white-line recovery.
+
+    A valid setup needs a *weekly body* below the EMA 50 white line, followed
+    by a close back above it within the next three weeks.  The current week's
+    OHLC is intentionally included: opening above the white line adds score,
+    while opening above, trading below it, and recovering the close adds a
+    larger score.  The latter is a live weekly condition and becomes final only
+    when the week closes.
+    """
+    if len(features) < WEEKLY_WHITE_LENGTH + 2:
+        return None
+    latest = len(features) - 1
+    last = features.iloc[latest]
+    required = (last["open"], last["low"], last["close"], last["white"], last["white_at_open"])
+    if not all(np.isfinite(float(value)) for value in required):
+        return None
+    last_white = float(last["white"])
+    tolerance = max(abs(last_white) * 0.0005, 0.01)
+    if float(last["close"]) <= last_white + tolerance:
+        return None
+
+    first_reclaim = max(1, latest - WEEKLY_RECLAIM_VISIBLE_WEEKS)
+    selected: dict[str, int] | None = None
+    for reclaim_position in range(latest, first_reclaim - 1, -1):
+        reclaim = features.iloc[reclaim_position]
+        prior = features.iloc[reclaim_position - 1]
+        reclaim_values = (reclaim["close"], reclaim["white"], prior["close"], prior["white"])
+        if not all(np.isfinite(float(value)) for value in reclaim_values):
+            continue
+        reclaim_white = float(reclaim["white"])
+        reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
+        crossed_back = (
+            float(reclaim["close"]) > reclaim_white + reclaim_tolerance
+            and float(prior["close"]) <= float(prior["white"]) + reclaim_tolerance
+        )
+        if not crossed_back:
+            continue
+        breakdown_start = max(0, reclaim_position - WEEKLY_RECLAIM_LOOKBACK_WEEKS)
+        for break_position in range(reclaim_position - 1, breakdown_start - 1, -1):
+            broken = features.iloc[break_position]
+            broken_values = (broken["open"], broken["close"], broken["white"])
+            if not all(np.isfinite(float(value)) for value in broken_values):
+                continue
+            broken_white = float(broken["white"])
+            broken_tolerance = max(abs(broken_white) * 0.0005, 0.01)
+            body_below_white = min(float(broken["open"]), float(broken["close"])) < broken_white - broken_tolerance
+            if body_below_white:
+                selected = {"break_position": break_position, "reclaim_position": reclaim_position}
+                break
+        if selected:
+            break
+    if selected is None:
+        return None
+
+    week_open_above = float(last["open"]) > float(last["white_at_open"]) + tolerance
+    week_dipped_below = float(last["low"]) < last_white - tolerance
+    week_reclaimed = bool(week_open_above and week_dipped_below and float(last["close"]) > last_white + tolerance)
+    weeks_to_reclaim = selected["reclaim_position"] - selected["break_position"]
+    score = 50 + {1: 20, 2: 12, 3: 5}.get(weeks_to_reclaim, 0)
+    if week_open_above:
+        score += 12
+    if week_reclaimed:
+        score += 20
+    return {
+        **selected,
+        "weeks_to_reclaim": weeks_to_reclaim,
+        "age_weeks": latest - selected["reclaim_position"],
+        "week_open_above_white": week_open_above,
+        "week_dipped_below_white": week_dipped_below,
+        "week_reclaimed_white": week_reclaimed,
+        "week_open": round(float(last["open"]), 8),
+        "week_low": round(float(last["low"]), 8),
+        "week_close": round(float(last["close"]), 8),
+        "white_line": round(last_white, 8),
+        "white_at_open": round(float(last["white_at_open"]), 8),
+        "score": score,
+    }
+
+
+def format_weekly_bar_time(index_value: object, session: MarketSession) -> str:
+    timestamp = pd.Timestamp(index_value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(session.timezone)
+    return timestamp.tz_convert(session.timezone).strftime("%Y-%m-%d 週線")
+
+
 def collect_signals(
     us_instruments: list[Instrument],
     taiwan_underlyings: dict[str, str],
@@ -1258,6 +1394,83 @@ def collect_signals(
     }
 
 
+def collect_weekly_reclaims(
+    us_instruments: list[Instrument],
+    taiwan_underlyings: dict[str, str],
+    taiwan_industries: dict[str, str],
+    binance_instruments: list[Instrument],
+    pepperstone_instruments: list[Instrument],
+    now: datetime,
+    public_profile_cache: dict[str, str | None] | None = None,
+) -> dict[str, object]:
+    """Scan the active week for white-line breakdown/reclaim structures."""
+    timeframe = WEEKLY_RECLAIM_TIMEFRAME
+    records = download_yahoo_records(us_instruments, timeframe)
+    records.extend(download_yahoo_records(pepperstone_instruments, timeframe))
+    records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
+    records.extend(download_binance_records(binance_instruments, timeframe))
+    signals: list[dict[str, object]] = []
+    scanned_by_market: dict[str, int] = {}
+
+    for instrument, raw in records:
+        frame = raw.dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
+        if len(frame) < WEEKLY_WHITE_LENGTH + 2:
+            continue
+        scanned_by_market[instrument.market] = scanned_by_market.get(instrument.market, 0) + 1
+        event = weekly_reclaim_event(weekly_white_features(frame))
+        if event is None:
+            continue
+        product_category = product_category_for(instrument, public_profile_cache)
+        reclaim_position = int(event["reclaim_position"])
+        break_position = int(event["break_position"])
+        sparkline, sparkline_signal_index = signal_sparkline(frame, reclaim_position, maximum_bars=26)
+        sparkline_start = max(0, len(frame) - 26)
+        signals.append(
+            {
+                "symbol": instrument.symbol,
+                "name": instrument.name,
+                "industry": instrument.industry,
+                "product_category": product_category,
+                "exchange": instrument.exchange,
+                "tradingview_symbol": tradingview_symbol_for(instrument),
+                "market": instrument.market,
+                "signal_type": "weekly_white_reclaim",
+                "side": "buy",
+                "bar_time_et": format_weekly_bar_time(frame.index[-1], instrument.session),
+                "occurred_at_utc": occurrence_time_utc(frame.index[reclaim_position], instrument.session),
+                "last_price": round(float(frame["Close"].iloc[-1]), 8),
+                "week_change_pct": latest_day_change_pct(frame, timeframe, instrument.session),
+                "break_time": format_weekly_bar_time(frame.index[break_position], instrument.session),
+                "reclaim_time": format_weekly_bar_time(frame.index[reclaim_position], instrument.session),
+                "sparkline": sparkline,
+                "sparkline_signal_index": sparkline_signal_index,
+                "sparkline_break_index": (
+                    break_position - sparkline_start if break_position >= sparkline_start else None
+                ),
+                **event,
+            }
+        )
+
+    signals.sort(
+        key=lambda item: (
+            -int(item["score"]),
+            str(item["market"]),
+            str(item["tradingview_symbol"]),
+        )
+    )
+    return {
+        "key": timeframe.key,
+        "label": timeframe.label,
+        "tradingview_interval": timeframe.tradingview_interval,
+        "white_line_definition": f"Trend Trader EMA {WEEKLY_WHITE_LENGTH}",
+        "lookback_weeks": WEEKLY_RECLAIM_LOOKBACK_WEEKS,
+        "visible_weeks": WEEKLY_RECLAIM_VISIBLE_WEEKS,
+        "scanned_symbols": sum(scanned_by_market.values()),
+        "scanned_by_market": scanned_by_market,
+        "signals": signals,
+    }
+
+
 def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[str]:
     """Return an import-safe, long-only watchlist in product-led order."""
     # TradingView watchlist imports accept ticker lines only.  Product and
@@ -1291,8 +1504,37 @@ def tradingview_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[
     return [symbol for symbol, _ in sorted(tradingview_entries.items(), key=tradingview_sort_key)]
 
 
+def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
+    """Return the active weekly white-reclaim monitor as a TradingView list."""
+    market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3}
+    entries: dict[str, dict[str, object]] = {}
+    signals = weekly_frame.get("signals", []) if isinstance(weekly_frame, dict) else []
+    for signal in signals if isinstance(signals, list) else []:
+        if not isinstance(signal, dict):
+            continue
+        symbol = str(signal.get("tradingview_symbol") or "").strip()
+        if not symbol:
+            continue
+        prior = entries.get(symbol)
+        if prior is None or int(signal.get("score") or 0) > int(prior.get("score") or 0):
+            entries[symbol] = signal
+    return [
+        symbol
+        for symbol, _ in sorted(
+            entries.items(),
+            key=lambda item: (
+                -int(item[1].get("score") or 0),
+                market_order.get(str(item[1].get("market") or ""), 99),
+                str(item[1].get("product_category") or item[1].get("industry") or "").casefold(),
+                item[0],
+            ),
+        )
+    ]
+
+
 def write_payload(
     frames: Iterable[dict[str, object]],
+    weekly_reclaim: dict[str, object],
     now: datetime,
     errors: list[str],
     binance_crypto_perpetuals: list[str] | None = None,
@@ -1312,6 +1554,7 @@ def write_payload(
         "market_status": "open" if is_regular_session(now) else "closed",
         "source": source,
         "timeframes": frame_list,
+        "weekly_reclaim": weekly_reclaim,
     }
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1321,6 +1564,11 @@ def write_payload(
     tradingview_symbols = tradingview_export_symbols(frame_list)
     TRADINGVIEW_EXPORT_FILE.write_text(
         "\n".join(tradingview_symbols) + ("\n" if tradingview_symbols else ""),
+        encoding="utf-8",
+    )
+    weekly_symbols = weekly_reclaim_export_symbols(weekly_reclaim)
+    WEEKLY_RECLAIM_EXPORT_FILE.write_text(
+        "\n".join(weekly_symbols) + ("\n" if weekly_symbols else ""),
         encoding="utf-8",
     )
     # A stable Taiwan universe for Pine Screener. Unlike the TD export above,
@@ -1421,10 +1669,20 @@ def main() -> None:
         )
         for timeframe in TIMEFRAMES
     ]
-    write_payload(frames, now, errors, binance_crypto_perpetuals)
+    weekly_reclaim = collect_weekly_reclaims(
+        us_instruments,
+        taiwan_underlyings,
+        taiwan_industries,
+        binance_instruments,
+        pepperstone_instruments,
+        now,
+        public_profile_cache,
+    )
+    write_payload(frames, weekly_reclaim, now, errors, binance_crypto_perpetuals)
     logging.info(
         "Sequential 已更新：%s",
-        ", ".join(f"{item['label']} {len(item['signals'])} 個訊號" for item in frames),
+        ", ".join(f"{item['label']} {len(item['signals'])} 個訊號" for item in frames)
+        + f"；週線白線收復 {len(weekly_reclaim['signals'])} 個",
     )
 
 

@@ -12,6 +12,9 @@ const elements = {
   downloadTradingViewList: document.querySelector("#download-tradingview-list"),
   tradingViewExportNote: document.querySelector("#tradingview-export-note"),
   trendReclaimFrames: document.querySelector("#trend-reclaim-frames"),
+  weeklyReclaimSignals: document.querySelector("#weekly-reclaim-signals"),
+  weeklyReclaimExportNote: document.querySelector("#weekly-reclaim-export-note"),
+  downloadWeeklyTradingViewList: document.querySelector("#download-weekly-tradingview-list"),
   marketPulseUpdated: document.querySelector("#market-pulse-updated"),
   futuresStrip: document.querySelector("#futures-strip"),
   scanProgress: document.querySelector("#scan-progress"),
@@ -207,12 +210,12 @@ function displayMarket(market) {
   return market === "台股個股期貨標的" ? "台股" : (market || "市場");
 }
 
-function makeTodayChange(value) {
+function makeTodayChange(value, label = "今日漲跌") {
   const percentage = Number(value);
   if (!Number.isFinite(percentage)) return null;
   const chip = document.createElement("span");
   chip.className = `today-change ${percentage > 0 ? "up" : percentage < 0 ? "down" : "flat"}`;
-  chip.textContent = `今日漲跌：${formatSigned(percentage)}%`;
+  chip.textContent = `${label}：${formatSigned(percentage)}%`;
   return chip;
 }
 
@@ -896,6 +899,130 @@ function renderTrendReclaims(frames) {
   elements.trendReclaimFrames.replaceChildren(...eligibleFrames.map(makeTrendReclaimTimeframe));
 }
 
+function plainQuote(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "資料不足";
+  return number.toLocaleString("en-US", {
+    minimumFractionDigits: number < 10 ? 2 : 0,
+    maximumFractionDigits: number < 10 ? 4 : 2,
+  });
+}
+
+function filteredWeeklyReclaims(frame) {
+  const selectedMarket = elements.sequentialMarket.value;
+  const signals = Array.isArray(frame?.signals) ? frame.signals : [];
+  return signals
+    .filter((signal) => signal.side === "buy" && signal.signal_type === "weekly_white_reclaim")
+    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .sort((left, right) => {
+      const scoreGap = Number(right.score || 0) - Number(left.score || 0);
+      if (scoreGap) return scoreGap;
+      return Date.parse(right.occurred_at_utc || 0) - Date.parse(left.occurred_at_utc || 0);
+    });
+}
+
+function makeWeeklyReclaimSignal(signal, interval) {
+  const card = document.createElement("article");
+  card.className = "weekly-reclaim-signal";
+
+  const top = document.createElement("div");
+  top.className = "alert-top";
+  const heading = document.createElement("div");
+  const ticker = document.createElement("h4");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const status = document.createElement("p");
+  status.className = "weekly-reclaim-status";
+  const age = Number(signal.age_weeks || 0);
+  status.textContent = age === 0 ? "做多｜本週白線收復（即時觀察）" : `做多｜${age} 週前白線收復`;
+  heading.append(ticker, status);
+
+  const quote = document.createElement("div");
+  quote.className = "signal-quote";
+  const price = document.createElement("strong");
+  price.className = "signal-price";
+  price.textContent = formatSignalPrice(signal);
+  const weekChange = makeTodayChange(signal.week_change_pct, "本週漲跌");
+  quote.append(price);
+  if (weekChange) quote.append(weekChange);
+  top.append(heading, quote);
+
+  const details = document.createElement("div");
+  details.className = "signal-details weekly-reclaim-details";
+  const industry = document.createElement("span");
+  industry.textContent = industryText(signal);
+  const recovery = document.createElement("span");
+  recovery.textContent = `跌破後 ${Number(signal.weeks_to_reclaim || 0)} 週收回`;
+  const score = document.createElement("span");
+  score.className = "weekly-score";
+  score.textContent = `結構分數 ${Number(signal.score || 0)}`;
+  details.append(industry, recovery, score);
+
+  const timeline = document.createElement("p");
+  timeline.className = "weekly-reclaim-timeline";
+  timeline.textContent = `實體跌破：${signal.break_time || "資料不足"}　→　收回：${signal.reclaim_time || "資料不足"}`;
+
+  const stateList = document.createElement("div");
+  stateList.className = "weekly-reclaim-states";
+  const baseState = document.createElement("span");
+  baseState.textContent = "週線收盤已站回 EMA 50 白線";
+  stateList.append(baseState);
+  if (signal.week_open_above_white) {
+    const opening = document.createElement("span");
+    opening.className = "bonus";
+    opening.textContent = "本週開盤在白線上方 ＋12";
+    stateList.append(opening);
+  }
+  if (signal.week_reclaimed_white) {
+    const intrweek = document.createElement("span");
+    intrweek.className = "strong-bonus";
+    intrweek.textContent = "本週開高→盤中跌破→收回白線 ＋20";
+    stateList.append(intrweek);
+  }
+
+  const values = (Array.isArray(signal.sparkline) ? signal.sparkline : [])
+    .map(Number)
+    .filter(Number.isFinite);
+  const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
+  const sparkline = makeSparkline(signal.sparkline, direction, true, {
+    title: "週線近 26 週走勢；橘點為實體跌破白線，藍點為收盤站回白線",
+    markers: [
+      { index: signal.sparkline_break_index, kind: "death", label: "跌破白線" },
+      { index: signal.sparkline_signal_index, kind: "signal", label: "收回白線" },
+    ],
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
+
+  const valuesText = document.createElement("p");
+  valuesText.className = "weekly-reclaim-values";
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ EMA 50 白線 ${plainQuote(signal.white_line)}`;
+
+  card.append(top, details, timeline, stateList);
+  if (sparkline) card.append(sparkline);
+  card.append(valuesText, makeTradingViewLink(signal, interval));
+  return card;
+}
+
+function renderWeeklyReclaims(payload) {
+  if (!elements.weeklyReclaimSignals) return;
+  const frame = payload?.weekly_reclaim || {};
+  const signals = filteredWeeklyReclaims(frame);
+  if (signals.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "timeframe-empty";
+    empty.textContent = `目前篩選市場中，沒有週線實體跌破白線後 ${Number(frame.lookback_weeks || 3)} 週內收回的結構。`;
+    elements.weeklyReclaimSignals.replaceChildren(empty);
+  } else {
+    elements.weeklyReclaimSignals.replaceChildren(
+      ...signals.map((signal) => makeWeeklyReclaimSignal(signal, frame.tradingview_interval || "W"))
+    );
+  }
+  if (elements.weeklyReclaimExportNote) {
+    elements.weeklyReclaimExportNote.textContent = signals.length
+      ? `目前篩選市場可匯出 ${new Set(signals.map(tradingViewImportSymbol).filter(Boolean)).size} 個週線白線收復標的；清單按結構分數排序。`
+      : "目前篩選市場沒有可匯出的週線白線收復標的。";
+  }
+}
+
 function filteredSignals(frame) {
   const selectedMarket = elements.sequentialMarket.value;
   const selectedSide = elements.sequentialSide.value;
@@ -960,6 +1087,19 @@ function selectedSignalsForExport() {
     .map((signal) => tradingViewImportSymbol(signal));
 }
 
+function selectedWeeklyReclaimsForExport() {
+  const signals = filteredWeeklyReclaims(sequentialPayload?.weekly_reclaim || {});
+  const unique = new Map();
+  for (const signal of signals) {
+    const symbol = tradingViewImportSymbol(signal);
+    if (!symbol || unique.has(symbol)) continue;
+    unique.set(symbol, signal);
+  }
+  return [...unique.values()]
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0) || compareExportSignals(left, right))
+    .map(tradingViewImportSymbol);
+}
+
 function downloadTradingViewList() {
   const symbols = selectedSignalsForExport();
   if (symbols.length === 0) {
@@ -977,6 +1117,28 @@ function downloadTradingViewList() {
   link.remove();
   URL.revokeObjectURL(href);
   elements.tradingViewExportNote.textContent = `已產生 ${symbols.length} 個不重複做多代號；已依市場、主力產品／產業與代號排序，可直接在 TradingView 匯入。`;
+}
+
+function downloadWeeklyTradingViewList() {
+  const symbols = selectedWeeklyReclaimsForExport();
+  if (symbols.length === 0) {
+    if (elements.weeklyReclaimExportNote) {
+      elements.weeklyReclaimExportNote.textContent = "目前篩選市場沒有可匯出的週線白線收復標的。";
+    }
+    return;
+  }
+  const blob = new Blob([`${symbols.join("\n")}\n`], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `KJ-Radar-Weekly-White-Reclaim-${new Date().toISOString().slice(0, 10)}.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  if (elements.weeklyReclaimExportNote) {
+    elements.weeklyReclaimExportNote.textContent = `已產生 ${symbols.length} 個週線白線收復標的；可直接匯入 TradingView 觀察清單。`;
+  }
 }
 
 function makeTimeframe(frame) {
@@ -1023,6 +1185,7 @@ function renderSequential(payload) {
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   renderTrendReclaims(frames);
+  renderWeeklyReclaims(payload);
   elements.sequentialUpdated.textContent = payload.updated_at_utc
     ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
     : "等待首次資料更新";
@@ -1140,6 +1303,9 @@ elements.sequentialMomentum.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);
+if (elements.downloadWeeklyTradingViewList) {
+  elements.downloadWeeklyTradingViewList.addEventListener("click", downloadWeeklyTradingViewList);
+}
 configureAppInstall();
 refresh();
 setInterval(refresh, 60_000);

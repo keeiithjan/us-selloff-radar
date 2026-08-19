@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260814-pwa1">
+    <link rel="stylesheet" href="assets/styles.css?v=20260818-weekly1">
   </head>
   <body>
     <main class="shell">
@@ -125,6 +125,19 @@
           <p class="sequential-note">僅做多，監測 15 分鐘與 1 小時：從死亡交叉到回站期間，收盤、AI Momentum 白線與黃線必須全程都在 TT（EMA 50／100）趨勢帶下方；任一根進入趨勢帶即作廢。其後 30 根完成 K 棒內，收盤由下往上站回白線，且白線仍在黃線下方。訊號後 8 根完成 K 棒內的回站訊號才會顯示。</p>
           <div id="trend-reclaim-frames" class="trend-reclaim-frames" aria-live="polite"></div>
         </div>
+        <section class="weekly-reclaim-monitor" aria-labelledby="weekly-reclaim-title">
+          <div class="section-heading weekly-reclaim-heading">
+            <div>
+              <p class="eyebrow">WEEKLY WHITE-LINE RECLAIM</p>
+              <h3 id="weekly-reclaim-title">週線｜實體跌破白線後，三週內站回</h3>
+            </div>
+            <button id="download-weekly-tradingview-list" class="download-list" type="button">匯出週線 TradingView 清單 .TXT</button>
+          </div>
+          <p class="sequential-note">白線採 Trend Trader EMA 50。需先有週線實體跌至白線下方，並在後續 3 週內收盤站回白線。以目前週 K 即時評分：本週開盤在白線上方加分；若本週開高於白線、盤中跌破後收回白線上方，額外加分。未收週前屬即時觀察，週末收盤後定案。</p>
+          <p id="weekly-reclaim-export-note" class="tradingview-export-note"></p>
+          <p class="pinescreener-note"><a class="pinescreener-link" href="data/KJ-Radar-Weekly-White-Reclaim.TXT" download>下載最新週線白線收復清單 .TXT</a><span>後台掃描完成後自動更新；亦可依目前市場篩選使用上方按鈕匯出。</span></p>
+          <div id="weekly-reclaim-signals" class="weekly-reclaim-signals" aria-live="polite"></div>
+        </section>
         <div id="sequential-frames" class="sequential-frames" aria-live="polite"></div>
         <p id="sequential-source" class="sequential-source"></p>
       </section>
@@ -135,6 +148,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260814-pwa1"></script>
+    <script src="assets/app.js?v=20260818-weekly1"></script>
   </body>
 </html>

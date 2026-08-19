@@ -7,6 +7,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 - 全球期貨脈搏與可嵌入的 TradingView 即時行情帶
 - 美股 400 檔、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
 - 做多：趨勢帶下方死亡交叉後站回白線
+- 週線白線收復：週線實體跌破 Trend Trader EMA 50 白線後，最多三週內收盤站回；本週開盤高於白線加分，若本週開高、盤中跌破再收回則額外加分
 - 可安裝的 PWA App：Android／Chrome／Edge 使用「安裝 App」，iPhone／iPad 於 Safari 選「分享」→「加入主畫面」
 
 爆量急跌、台灣加權一小時技術圖、指標股盤前／夜盤異動介面與其 Actions 執行步驟均已移除。
@@ -26,6 +27,8 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 首頁的「下載 TradingView 上傳清單 .TXT」會依目前市場輸出做多 TD 標的：每行一個 `交易所:代號`，重複標的自動合併；順序為市場、主力產品／產業、代號。為了確保可直接匯入 TradingView，不在 TXT 插入產業標題列。
 
 每次 GitHub Actions 完成掃描，亦會產生 `data/KJ-Radar-TradingView.TXT`，內容僅含做多 TD 標的，並依市場與主力產品／產業排序。
+
+週線監控可由首頁依目前市場直接匯出，Actions 同時寫入 `data/KJ-Radar-Weekly-White-Reclaim.TXT`。每行皆為可直接匯入 TradingView 的 `交易所:代號`，按結構分數、市場、產品／產業排序。
 
 ## TradingView Pine Screener
 

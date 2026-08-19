@@ -1,10 +1,10 @@
-const CACHE_NAME = "kj-radar-shell-v1";
+const CACHE_NAME = "kj-radar-shell-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./assets/styles.css?v=20260814-pwa1",
-  "./assets/app.js?v=20260814-pwa1",
+  "./assets/styles.css?v=20260818-weekly1",
+  "./assets/app.js?v=20260818-weekly1",
   "./assets/kj-radar-icon.svg",
 ];
 const LIVE_DATA_SUFFIXES = ["/data/sequential.json", "/data/market.json"];
