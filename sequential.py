@@ -1262,13 +1262,17 @@ def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
 def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     """Return the active long-only weekly white-line recovery.
 
-    A valid setup needs a weekly close below the AI Momentum white line after
-    its white/yellow death cross below the Trend Trader ribbon, followed by a
-    close back above the same AI white line within the next three weeks. The
-    priority setup is the *first* recovery week: it opens above the prior
-    confirmed white line, dips below it during the week, then closes back
-    above the current AI white line. The second and third weeks may stay
-    visible as lower-priority follow-through, but cannot become direct-focus.
+    The *only* entry rule is the user's weekly structure:
+
+    1. A prior completed weekly candle actually closed below the AI Momentum
+       white line (the breakdown).
+    2. The first week after that breakdown opens at / above the previous
+       completed white line (the stand-back-above event).
+
+    A first-week intrabar pullback-and-close-back-above, current close above
+    white, the white/yellow death cross below Trend Trader's ribbon, and the
+    hourly state are useful confirmations.  They must never remove a valid
+    opening recovery; they only change the score, labels, or optional filters.
     """
     if len(features) < WEEKLY_AI_MINIMUM_BARS:
         return None
@@ -1281,81 +1285,74 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     white_at_open = float(last["white_at_open"])
     tolerance = max(abs(last_white) * 0.0005, 0.01)
     open_tolerance = max(abs(white_at_open) * 0.0005, 0.01)
-    week_open_above = float(last["open"]) > white_at_open + open_tolerance
+    week_open_above = float(last["open"]) >= white_at_open - open_tolerance
     week_close_above = float(last["close"]) > last_white + tolerance
-    # This is still an active watchlist rather than a historical archive: the
-    # latest weekly price needs to hold above white.  Its current opening is
-    # not required for a second/third-week follow-through card.
-    if not week_close_above:
-        return None
+    selected: dict[str, int | None] | None = None
+    breakdown_start = max(0, latest - WEEKLY_RECLAIM_LOOKBACK_WEEKS)
+    # Search the latest actual breakdown first.  Its immediately following
+    # week is the only possible first stand-back-above week; later close
+    # crosses are confirmations, not a replacement for that opening event.
+    for break_position in range(latest - 1, breakdown_start - 1, -1):
+        broken = features.iloc[break_position]
+        broken_values = (broken["close"], broken["white"])
+        if not all(np.isfinite(float(value)) for value in broken_values):
+            continue
+        broken_white = float(broken["white"])
+        broken_tolerance = max(abs(broken_white) * 0.0005, 0.01)
+        if float(broken["close"]) >= broken_white - broken_tolerance:
+            continue
 
-    first_reclaim = max(1, latest - WEEKLY_RECLAIM_VISIBLE_WEEKS)
-    selected: dict[str, int] | None = None
-    for reclaim_position in range(latest, first_reclaim - 1, -1):
+        reclaim_position = break_position + 1
         reclaim = features.iloc[reclaim_position]
-        prior = features.iloc[reclaim_position - 1]
-        reclaim_values = (reclaim["close"], reclaim["white"], prior["close"], prior["white"])
+        reclaim_values = (reclaim["open"], reclaim["white_at_open"])
         if not all(np.isfinite(float(value)) for value in reclaim_values):
             continue
-        reclaim_white = float(reclaim["white"])
-        reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
-        crossed_back = (
-            float(reclaim["close"]) > reclaim_white + reclaim_tolerance
-            and float(prior["close"]) <= float(prior["white"]) + reclaim_tolerance
+        reclaim_white_at_open = float(reclaim["white_at_open"])
+        reclaim_open_tolerance = max(abs(reclaim_white_at_open) * 0.0005, 0.01)
+        first_week_open_above = float(reclaim["open"]) >= (
+            reclaim_white_at_open - reclaim_open_tolerance
         )
-        if not crossed_back:
+        if not first_week_open_above:
             continue
-        breakdown_start = max(0, reclaim_position - WEEKLY_RECLAIM_LOOKBACK_WEEKS)
-        for break_position in range(reclaim_position - 1, breakdown_start - 1, -1):
-            broken = features.iloc[break_position]
-            broken_values = (broken["open"], broken["close"], broken["white"])
-            if not all(np.isfinite(float(value)) for value in broken_values):
+
+        # This confirmation is intentionally optional.  It remains visible
+        # in the card and can be selected in the UI, but cannot discard the
+        # primary weekly opening-recovery signal.
+        death_cross_position: int | None = None
+        death_start = max(1, break_position - WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS)
+        for death_position in range(break_position, death_start - 1, -1):
+            death = features.iloc[death_position]
+            prior_death = features.iloc[death_position - 1]
+            death_values = (
+                death["white"], death["yellow"], death["trend_lower_edge"],
+                prior_death["white"], prior_death["yellow"],
+            )
+            if not all(np.isfinite(float(value)) for value in death_values):
                 continue
-            broken_white = float(broken["white"])
-            broken_tolerance = max(abs(broken_white) * 0.0005, 0.01)
-            # A bullish week can open below the line and finish above it.  It
-            # is a reclaim, not a breakdown.  Require the *weekly close* to
-            # remain below white before arming a later weekly recovery.
-            closed_below_white = float(broken["close"]) < broken_white - broken_tolerance
-            if not closed_below_white:
-                continue
-            death_cross_position: int | None = None
-            death_start = max(1, break_position - WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS)
-            for death_position in range(break_position, death_start - 1, -1):
-                death = features.iloc[death_position]
-                prior_death = features.iloc[death_position - 1]
-                death_values = (
-                    death["white"], death["yellow"], death["trend_lower_edge"],
-                    prior_death["white"], prior_death["yellow"],
-                )
-                if not all(np.isfinite(float(value)) for value in death_values):
-                    continue
-                death_white = float(death["white"])
-                death_yellow = float(death["yellow"])
-                death_lower_edge = float(death["trend_lower_edge"])
-                death_tolerance = max(abs(death_white) * 0.0005, 0.01)
-                ribbon_tolerance = max(abs(death_lower_edge) * 0.0005, 0.01)
-                crossed_down = (
-                    float(prior_death["white"]) >= float(prior_death["yellow"]) - death_tolerance
-                    and death_white < death_yellow - death_tolerance
-                )
-                below_ribbon = max(death_white, death_yellow) < death_lower_edge - ribbon_tolerance
-                if crossed_down and below_ribbon:
-                    death_cross_position = death_position
-                    break
-            if death_cross_position is not None:
-                selected = {
-                    "break_position": break_position,
-                    "reclaim_position": reclaim_position,
-                    "death_cross_position": death_cross_position,
-                }
+            death_white = float(death["white"])
+            death_yellow = float(death["yellow"])
+            death_lower_edge = float(death["trend_lower_edge"])
+            death_tolerance = max(abs(death_white) * 0.0005, 0.01)
+            ribbon_tolerance = max(abs(death_lower_edge) * 0.0005, 0.01)
+            crossed_down = (
+                float(prior_death["white"]) >= float(prior_death["yellow"]) - death_tolerance
+                and death_white < death_yellow - death_tolerance
+            )
+            below_ribbon = max(death_white, death_yellow) < death_lower_edge - ribbon_tolerance
+            if crossed_down and below_ribbon:
+                death_cross_position = death_position
                 break
-        if selected:
-            break
+        selected = {
+            "break_position": break_position,
+            "reclaim_position": reclaim_position,
+            "death_cross_position": death_cross_position,
+        }
+        break
+
     if selected is None:
         return None
 
-    reclaim_position = selected["reclaim_position"]
+    reclaim_position = int(selected["reclaim_position"])
     reclaim = features.iloc[reclaim_position]
     reclaim_values = (
         reclaim["open"], reclaim["low"], reclaim["close"], reclaim["white"], reclaim["white_at_open"],
@@ -1366,19 +1363,15 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     reclaim_white_at_open = float(reclaim["white_at_open"])
     reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
     reclaim_open_tolerance = max(abs(reclaim_white_at_open) * 0.0005, 0.01)
-    first_week_open_above = float(reclaim["open"]) > reclaim_white_at_open + reclaim_open_tolerance
+    first_week_open_above = float(reclaim["open"]) >= reclaim_white_at_open - reclaim_open_tolerance
     first_week_dipped_below = float(reclaim["low"]) < reclaim_white - reclaim_tolerance
     first_week_closed_above = float(reclaim["close"]) > reclaim_white + reclaim_tolerance
     first_week_pullback_reclaim = bool(
         first_week_open_above and first_week_dipped_below and first_week_closed_above
     )
-    # The requested setup is not a generic close cross from below.  Its first
-    # recovery week must begin above white, test below it intraweek, and close
-    # back above it.  This excludes cases such as TPR opening below the line
-    # and merely crossing it later in the week.
-    if not first_week_pullback_reclaim:
-        return None
     age_weeks = latest - reclaim_position
+    if age_weeks > WEEKLY_RECLAIM_VISIBLE_WEEKS:
+        return None
     first_week_open_distance_pct = (float(reclaim["open"]) / reclaim_white_at_open - 1) * 100
     week_open_distance_pct = (float(last["open"]) / white_at_open - 1) * 100
     week_close_distance_pct = (float(last["close"]) / last_white - 1) * 100
@@ -1386,12 +1379,14 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     week_reclaimed = bool(
         age_weeks == 0 and week_open_above and week_dipped_below and week_close_above
     )
-    weeks_to_reclaim = selected["reclaim_position"] - selected["break_position"]
+    weeks_to_reclaim = reclaim_position - int(selected["break_position"])
     score = 50 + {1: 20, 2: 12, 3: 5}.get(weeks_to_reclaim, 0)
-    if age_weeks == 0 and week_open_above:
+    if first_week_closed_above:
         score += WEEKLY_OPEN_CLOSE_BONUS
-    if age_weeks == 0 and first_week_pullback_reclaim:
+    if first_week_pullback_reclaim:
         score += 20
+    if selected["death_cross_position"] is not None:
+        score += 10
     second_week_near_white_open = bool(
         age_weeks == 1
         and first_week_open_above
@@ -1407,11 +1402,14 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         "week_open_above_white": week_open_above,
         "week_close_above_white": week_close_above,
         "week_white_structure_active": True,
+        "actual_breakdown_before_reclaim": True,
+        "death_cross_below_ribbon": selected["death_cross_position"] is not None,
         "week_dipped_below_white": week_dipped_below,
         "week_reclaimed_white": week_reclaimed,
         "first_week_is_current": age_weeks == 0,
         "first_week_open_above_white": first_week_open_above,
         "first_week_dipped_below_white": first_week_dipped_below,
+        "first_week_closed_above_white": first_week_closed_above,
         "first_week_pullback_reclaim": first_week_pullback_reclaim,
         "first_week_open_distance_pct": round(first_week_open_distance_pct, 4),
         "week_open_distance_pct": round(week_open_distance_pct, 4),
@@ -1813,7 +1811,8 @@ def collect_weekly_reclaims(
         product_category = product_category_for(instrument, public_profile_cache)
         reclaim_position = int(event["reclaim_position"])
         break_position = int(event["break_position"])
-        death_cross_position = int(event["death_cross_position"])
+        death_cross_raw = event.get("death_cross_position")
+        death_cross_position = int(death_cross_raw) if death_cross_raw is not None else None
         sparkline, sparkline_signal_index = signal_sparkline(frame, reclaim_position, maximum_bars=26)
         sparkline_start = max(0, len(frame) - 26)
         signal = {
@@ -1831,10 +1830,16 @@ def collect_weekly_reclaims(
                 "last_price": round(float(frame["Close"].iloc[-1]), 8),
                 "week_change_pct": latest_day_change_pct(frame, timeframe, instrument.session),
                 "break_time": format_weekly_bar_time(frame.index[break_position], instrument.session),
-                "death_cross_time": format_weekly_bar_time(
-                    frame.index[death_cross_position], instrument.session
+                "death_cross_time": (
+                    format_weekly_bar_time(frame.index[death_cross_position], instrument.session)
+                    if death_cross_position is not None
+                    else None
                 ),
-                "death_cross_weeks_before_break": break_position - death_cross_position,
+                "death_cross_weeks_before_break": (
+                    break_position - death_cross_position
+                    if death_cross_position is not None
+                    else None
+                ),
                 "reclaim_time": format_weekly_bar_time(frame.index[reclaim_position], instrument.session),
                 "sparkline": sparkline,
                 "sparkline_signal_index": sparkline_signal_index,
@@ -1843,7 +1848,7 @@ def collect_weekly_reclaims(
                 ),
                 "sparkline_death_index": (
                     death_cross_position - sparkline_start
-                    if death_cross_position >= sparkline_start
+                    if death_cross_position is not None and death_cross_position >= sparkline_start
                     else None
                 ),
                 **event,

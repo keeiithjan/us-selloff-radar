@@ -8,7 +8,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 - 美股 500 檔（跨能源、公用事業、工業國防、核能與原物料、潔淨能源、金融科技、跨國消費、汽車運輸、軟體與醫療等類別）、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
 - 做多：趨勢帶下方死亡交叉後站回白線
 - 大黑 K 壓趨勢帶（獨立觀察）：15 分鐘／1 小時的大黑 K 實體接觸 Trend Trader EMA 50／100 帶、且收在帶下緣或更低；不併入 TD 或白線收復分數，也不推論交易意圖。
-- 週線白線收復：白線／黃線採用 AI Momentum 的 kernClose／zoneMid；必須先在 Trend Trader EMA 50／100 趨勢帶下完成白黃死亡交叉，再出現週K收盤跌破 AI 白線、首週開高回踩並收回 AI 白線的結構。收復後最多追蹤三週。
+- 週線白線站回：白線／黃線採用 AI Momentum 的 kernClose／zoneMid；主規則是前週實體收盤跌破 AI 白線後，首週開盤站回前一根已確認白線上方。盤中回踩收回、收盤站上、白黃死亡交叉在 Trend Trader EMA 50／100 趨勢帶下，以及 1H 狀態皆保留為加分與篩選，不會排除主訊號；最多追蹤三週。
 - 可安裝的 PWA App：Android／Chrome／Edge 使用「安裝 App」，iPhone／iPad 於 Safari 選「分享」→「加入主畫面」
 
 爆量急跌、台灣加權一小時技術圖、指標股盤前／夜盤異動介面與其 Actions 執行步驟均已移除。

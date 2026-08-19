@@ -1018,10 +1018,16 @@ function filteredWeeklyReclaims(frame) {
     .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
     .filter((signal) => {
       if (selectedFilter === "first-week") {
-        return Boolean(signal.first_week_is_current && signal.first_week_pullback_reclaim);
+        return Boolean(signal.first_week_is_current && signal.first_week_open_above_white);
+      }
+      if (selectedFilter === "pullback-reclaim") {
+        return Boolean(signal.first_week_pullback_reclaim);
       }
       if (selectedFilter === "hourly-second-four") {
         return Boolean(signal.hourly_second_reclaim_within_four_bars);
+      }
+      if (selectedFilter === "death-cross-below-ribbon") {
+        return Boolean(signal.death_cross_below_ribbon);
       }
       if (selectedFilter === "golden-cross") {
         return Boolean(signal.weekly_ai_golden_cross);
@@ -1048,7 +1054,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const status = document.createElement("p");
   status.className = "weekly-reclaim-status";
   const age = Number(signal.age_weeks || 0);
-  status.textContent = age === 0 ? "做多｜本週白線收復（即時觀察）" : `做多｜${age} 週前白線收復`;
+  status.textContent = age === 0 ? "做多｜本週開盤站回白線（即時觀察）" : `做多｜首週站回後第 ${age} 週追蹤`;
   heading.append(ticker, status);
 
   const quote = document.createElement("div");
@@ -1072,7 +1078,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const industry = document.createElement("span");
   industry.textContent = industryText(signal);
   const recovery = document.createElement("span");
-  recovery.textContent = `跌破後 ${Number(signal.weeks_to_reclaim || 0)} 週收回`;
+  recovery.textContent = `實體跌破後第 ${Number(signal.weeks_to_reclaim || 0)} 週開盤站回`;
   const score = document.createElement("span");
   score.className = "weekly-score";
   score.textContent = `結構分數 ${Number(signal.score || 0)}`;
@@ -1080,27 +1086,48 @@ function makeWeeklyReclaimSignal(signal, interval) {
 
   const timeline = document.createElement("p");
   timeline.className = "weekly-reclaim-timeline";
-  timeline.textContent = `白黃死亡交叉：${signal.death_cross_time || "資料不足"}　→　週K收盤跌破白線：${signal.break_time || "資料不足"}　→　收回：${signal.reclaim_time || "資料不足"}`;
+  const deathCrossText = signal.death_cross_below_ribbon
+    ? `白黃死亡交叉（帶下）：${signal.death_cross_time || "資料不足"}`
+    : "白黃死亡交叉（帶下）：未偵測（僅輔助，不影響入選）";
+  timeline.textContent = `週K收盤實體跌破 AI 白線：${signal.break_time || "資料不足"}　→　首週開盤站回：${signal.reclaim_time || "資料不足"}　｜　${deathCrossText}`;
 
   const stateList = document.createElement("div");
   stateList.className = "weekly-reclaim-states";
   const baseState = document.createElement("span");
   baseState.textContent = age === 0
-    ? "第一根收復週K｜目前收盤仍在 AI Momentum 白線上方"
-    : `收復後第 ${age} 週｜僅延續追蹤，不給週K加分`;
+    ? "主規則成立｜本週開盤已在 AI Momentum 白線上方"
+    : `首週開盤站回成立｜目前為第 ${age} 週延續追蹤`;
   stateList.append(baseState);
   if (signal.first_week_pullback_reclaim) {
     const firstWeek = document.createElement("span");
     firstWeek.className = age === 0 ? "strong-bonus" : "hourly-pending";
     firstWeek.textContent = age === 0
-      ? "第一根週K：開盤在白線上方→盤中跌破→收回 ＋32"
-      : "第一根週K曾開高、回踩後收回（歷史結構）";
+      ? "輔助加分｜首週開盤在白線上方→盤中跌破→收回 ＋20"
+      : "輔助結構｜首週曾開高、回踩後收回";
     stateList.append(firstWeek);
-  } else if (age === 0 && signal.week_open_above_white) {
-    const opening = document.createElement("span");
-    opening.className = "bonus";
-    opening.textContent = "第一根週K開盤、收盤在白線上方 ＋12";
-    stateList.append(opening);
+  }
+  if (signal.first_week_closed_above_white) {
+    const firstClose = document.createElement("span");
+    firstClose.className = "bonus";
+    firstClose.textContent = "輔助確認｜首週收盤仍在白線上方 ＋12";
+    stateList.append(firstClose);
+  }
+  if (signal.week_close_above_white) {
+    const currentClose = document.createElement("span");
+    currentClose.className = "bonus";
+    currentClose.textContent = "目前週K收盤在白線上方";
+    stateList.append(currentClose);
+  } else {
+    const currentClose = document.createElement("span");
+    currentClose.className = "hourly-pending";
+    currentClose.textContent = "目前週K收盤已回到白線下（保留觀察）";
+    stateList.append(currentClose);
+  }
+  if (signal.death_cross_below_ribbon) {
+    const deathCross = document.createElement("span");
+    deathCross.className = "bonus";
+    deathCross.textContent = "輔助加分｜白黃死亡交叉發生在趨勢帶下 ＋10";
+    stateList.append(deathCross);
   }
   if (signal.second_week_near_white_open) {
     const secondWeek = document.createElement("span");
@@ -1137,7 +1164,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const signedPercent = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "資料不足";
   const firstBehavior = signal.first_week_pullback_reclaim
     ? "開盤在上方→盤中跌破→收回"
-    : signal.first_week_open_above_white ? "開盤在白線上方" : "開盤未站上白線";
+    : signal.first_week_open_above_white ? "開盤站在白線上方（主規則）" : "開盤未站上白線";
   const hourlyDistance = Number(signal.hourly_white_distance_pct);
   const hourlyStatus = signal.hourly_status_available
     ? `1H：${signal.hourly_above_white ? "已站上" : "未站上"}白線（${signedPercent(hourlyDistance)}）`
@@ -1189,7 +1216,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const hourlyValues = signal.hourly_status_available
     ? ` ｜ 1H C ${plainQuote(signal.hourly_close)} / 白線 ${plainQuote(signal.hourly_white_line)}`
     : "";
-  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}`;
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線（開盤基準）${plainQuote(signal.white_at_open)} ／ 目前 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}`;
 
   card.append(top, details, timeline, stateList, whiteStatus, weeklyAiStatus);
   if (sparkline) card.append(sparkline);
@@ -1204,7 +1231,7 @@ function renderWeeklyReclaims(payload) {
   if (signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "timeframe-empty";
-    empty.textContent = `目前篩選市場中，沒有週線實體跌破白線後 ${Number(frame.lookback_weeks || 3)} 週內收回的結構。`;
+    empty.textContent = `目前篩選市場中，沒有近 ${Number(frame.lookback_weeks || 3)} 週實體跌破白線後、首週開盤站回白線的結構。`;
     elements.weeklyReclaimSignals.replaceChildren(empty);
   } else {
     elements.weeklyReclaimSignals.replaceChildren(
