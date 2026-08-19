@@ -1244,10 +1244,6 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         score += WEEKLY_OPEN_CLOSE_BONUS
     if age_weeks == 0 and first_week_pullback_reclaim:
         score += 20
-    elif age_weeks == 1:
-        score += 6
-    elif age_weeks == 2:
-        score += 3
     return {
         **selected,
         "weeks_to_reclaim": weeks_to_reclaim,

@@ -973,7 +973,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const baseState = document.createElement("span");
   baseState.textContent = age === 0
     ? "第一根收復週K｜目前收盤仍在 EMA 50 白線上方"
-    : `收復後第 ${age} 週｜僅延續追蹤、降低權重`;
+    : `收復後第 ${age} 週｜僅延續追蹤，不給週K加分`;
   stateList.append(baseState);
   if (signal.first_week_pullback_reclaim) {
     const firstWeek = document.createElement("span");
