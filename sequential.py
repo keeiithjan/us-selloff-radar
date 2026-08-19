@@ -1163,11 +1163,11 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     """Return the active long-only weekly white-line recovery.
 
     A valid setup needs a *weekly body* below the EMA 50 white line, followed
-    by a close back above it within the next three weeks.  For an active card,
-    the current weekly candle must open above the white line *at the opening*
-    and still close above the current white line.  A weekly lower wick alone
-    never qualifies it.  Opening above, dipping under the line, and recovering
-    the close is retained as an extra live-strength condition.
+    by a close back above it within the next three weeks.  The priority setup
+    is the *first* recovery week: it opens above white, dips below it during
+    the week, then closes back above it.  The second and third weeks may stay
+    visible as lower-priority follow-through, but they cannot become the
+    direct-focus setup themselves.
     """
     if len(features) < WEEKLY_WHITE_LENGTH + 2:
         return None
@@ -1182,9 +1182,10 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     open_tolerance = max(abs(white_at_open) * 0.0005, 0.01)
     week_open_above = float(last["open"]) > white_at_open + open_tolerance
     week_close_above = float(last["close"]) > last_white + tolerance
-    # This monitor is an active watchlist, not a historical archive.  A card
-    # must be holding the current weekly structure at both the open and close.
-    if not (week_open_above and week_close_above):
+    # This is still an active watchlist rather than a historical archive: the
+    # latest weekly price needs to hold above white.  Its current opening is
+    # not required for a second/third-week follow-through card.
+    if not week_close_above:
         return None
 
     first_reclaim = max(1, latest - WEEKLY_RECLAIM_VISIBLE_WEEKS)
@@ -1220,22 +1221,46 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     if selected is None:
         return None
 
+    reclaim_position = selected["reclaim_position"]
+    reclaim = features.iloc[reclaim_position]
+    reclaim_white = float(reclaim["white"])
+    reclaim_white_at_open = float(reclaim["white_at_open"])
+    reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
+    reclaim_open_tolerance = max(abs(reclaim_white_at_open) * 0.0005, 0.01)
+    first_week_open_above = float(reclaim["open"]) > reclaim_white_at_open + reclaim_open_tolerance
+    first_week_dipped_below = float(reclaim["low"]) < reclaim_white - reclaim_tolerance
+    first_week_closed_above = float(reclaim["close"]) > reclaim_white + reclaim_tolerance
+    first_week_pullback_reclaim = bool(
+        first_week_open_above and first_week_dipped_below and first_week_closed_above
+    )
+    age_weeks = latest - reclaim_position
     week_dipped_below = float(last["low"]) < last_white - tolerance
-    week_reclaimed = bool(week_open_above and week_dipped_below and week_close_above)
+    week_reclaimed = bool(
+        age_weeks == 0 and week_open_above and week_dipped_below and week_close_above
+    )
     weeks_to_reclaim = selected["reclaim_position"] - selected["break_position"]
     score = 50 + {1: 20, 2: 12, 3: 5}.get(weeks_to_reclaim, 0)
-    score += WEEKLY_OPEN_CLOSE_BONUS
-    if week_reclaimed:
+    if age_weeks == 0 and week_open_above:
+        score += WEEKLY_OPEN_CLOSE_BONUS
+    if age_weeks == 0 and first_week_pullback_reclaim:
         score += 20
+    elif age_weeks == 1:
+        score += 6
+    elif age_weeks == 2:
+        score += 3
     return {
         **selected,
         "weeks_to_reclaim": weeks_to_reclaim,
-        "age_weeks": latest - selected["reclaim_position"],
+        "age_weeks": age_weeks,
         "week_open_above_white": week_open_above,
         "week_close_above_white": week_close_above,
         "week_white_structure_active": True,
         "week_dipped_below_white": week_dipped_below,
         "week_reclaimed_white": week_reclaimed,
+        "first_week_is_current": age_weeks == 0,
+        "first_week_open_above_white": first_week_open_above,
+        "first_week_dipped_below_white": first_week_dipped_below,
+        "first_week_pullback_reclaim": first_week_pullback_reclaim,
         "week_open": round(float(last["open"]), 8),
         "week_low": round(float(last["low"]), 8),
         "week_close": round(float(last["close"]), 8),
@@ -1591,6 +1616,8 @@ def collect_weekly_reclaims(
             signal["score"] = int(signal["score"]) + HOURLY_SECOND_RECLAIM_BONUS
         signal["direct_focus"] = bool(
             signal["week_white_structure_active"]
+            and signal["first_week_is_current"]
+            and signal["first_week_pullback_reclaim"]
             and hourly_state["hourly_above_white"]
             and hourly_state["hourly_second_reclaim"]
         )

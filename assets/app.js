@@ -971,13 +971,22 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const stateList = document.createElement("div");
   stateList.className = "weekly-reclaim-states";
   const baseState = document.createElement("span");
-  baseState.textContent = "週K開盤、收盤皆在 EMA 50 白線上方";
+  baseState.textContent = age === 0
+    ? "第一根收復週K｜目前收盤仍在 EMA 50 白線上方"
+    : `收復後第 ${age} 週｜僅延續追蹤、降低權重`;
   stateList.append(baseState);
-  if (signal.week_reclaimed_white) {
-    const intrweek = document.createElement("span");
-    intrweek.className = "strong-bonus";
-    intrweek.textContent = "本週開高→盤中跌破→收回白線 ＋20";
-    stateList.append(intrweek);
+  if (signal.first_week_pullback_reclaim) {
+    const firstWeek = document.createElement("span");
+    firstWeek.className = age === 0 ? "strong-bonus" : "hourly-pending";
+    firstWeek.textContent = age === 0
+      ? "第一根週K：開盤在白線上方→盤中跌破→收回 ＋32"
+      : "第一根週K曾開高、回踩後收回（歷史結構）";
+    stateList.append(firstWeek);
+  } else if (age === 0 && signal.week_open_above_white) {
+    const opening = document.createElement("span");
+    opening.className = "bonus";
+    opening.textContent = "第一根週K開盤、收盤在白線上方 ＋12";
+    stateList.append(opening);
   }
   if (signal.hourly_status_available) {
     const hourly = document.createElement("span");
