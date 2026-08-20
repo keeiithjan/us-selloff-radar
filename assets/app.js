@@ -932,8 +932,8 @@ function filteredWeeklyReclaims(frame) {
       if (selectedFilter === "hourly-within-three") {
         return Boolean(signal.hourly_within_three);
       }
-      if (selectedFilter === "golden-cross") {
-        return Boolean(signal.weekly_ai_golden_cross);
+      if (selectedFilter === "white-above-yellow") {
+        return Boolean(signal.weekly_ai_white_above_yellow);
       }
       return true;
     })
@@ -1201,16 +1201,8 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const weeklyAiStatus = document.createElement("p");
   weeklyAiStatus.className = "weekly-white-status weekly-ai-status";
   if (signal.weekly_ai_white_yellow_available) {
-    const crossAge = Number(signal.weekly_ai_golden_cross_weeks_ago);
-    const crossAgeText = crossAge === 0 ? "本週完成" : `${crossAge} 週前完成`;
-    if (signal.weekly_ai_golden_cross) {
-      weeklyAiStatus.textContent = `週K AI 白線金叉黃線：${crossAgeText}`;
-      const golden = document.createElement("span");
-      golden.className = "strong-bonus";
-      golden.textContent = `週K白金叉黃線：${crossAgeText}`;
-      stateList.append(golden);
-    } else if (signal.weekly_ai_white_above_yellow) {
-      weeklyAiStatus.textContent = "週K白線位於黃線上方（+100）；最近 4 週未出現金叉";
+    if (signal.weekly_ai_white_above_yellow) {
+      weeklyAiStatus.textContent = "週K白線位於黃線上方（+100）；不要求近期黃金交叉";
     } else {
       weeklyAiStatus.textContent = "週K白線仍在黃線下方；不給白黃趨勢加分";
     }

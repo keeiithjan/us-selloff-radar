@@ -130,13 +130,13 @@
                   <option value="first-foot">第 1 根週K剛收回白線</option>
                   <option value="hourly-just-above">1H 剛站回白線（第 1 根）</option>
                   <option value="hourly-within-three">1H 站上白線第 1～3 根</option>
-                  <option value="golden-cross">週K 白線金叉黃線（4週內）</option>
+                  <option value="white-above-yellow">週K 白線在黃線上方</option>
                 </select>
               </label>
               <button id="download-weekly-tradingview-list" class="download-list" type="button">匯出週線 TradingView 清單 .TXT</button>
             </div>
           </div>
-          <p class="sequential-note">週線區完全依照 KJ 白線黃線＋1H Screener V12：必須「整根週K實體」都在 AI 白線下方，才是有效跌破；首根站回必須收盤重新站上白線。只追蹤站回後第 1～3 根，且目前這根週K的開盤與收盤都必須在白線上方。第 2 根與第 3 根若盤中跌破白線 0.1% 後收回，依序為最高／次高優先；週K白線在黃線上方與白金叉為加分條件。1H 以最新一次站回白線後的完成 K 根數計分：第 1 根最高、接著第 2、3 根遞減。</p>
+          <p class="sequential-note">週線區完全依照 KJ 白線黃線＋1H Screener V12：必須「整根週K實體」都在 AI 白線下方，才是有效跌破；首根站回必須收盤重新站上白線。只追蹤站回後第 1～3 根，且目前這根週K的開盤與收盤都必須在白線上方。第 2 根與第 3 根若盤中跌破白線 0.1% 後收回，依序為最高／次高優先；週K只要求白線在黃線上方，不要求近期白金叉。1H 以最新一次站回白線後的完成 K 根數計分：第 1 根最高、接著第 2、3 根遞減。</p>
           <p id="weekly-reclaim-export-note" class="tradingview-export-note"></p>
           <p class="pinescreener-note"><a class="pinescreener-link" href="data/KJ-Radar-Weekly-White-Reclaim.TXT" download>下載最新週線白線收復清單 .TXT</a><span>後台掃描完成後自動更新；亦可依目前市場篩選使用上方按鈕匯出。</span></p>
           <div id="weekly-reclaim-signals" class="weekly-reclaim-signals" aria-live="polite"></div>
@@ -161,6 +161,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260820-weekly-v12-aligned1"></script>
+    <script src="assets/app.js?v=20260820-weekly-whiteabove1"></script>
   </body>
 </html>
