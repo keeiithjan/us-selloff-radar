@@ -926,12 +926,6 @@ function filteredWeeklyReclaims(frame) {
       if (selectedFilter === "first-foot") {
         return Boolean(signal.first_foot_now);
       }
-      if (selectedFilter === "hourly-just-above") {
-        return Boolean(signal.hourly_just_above);
-      }
-      if (selectedFilter === "hourly-within-three") {
-        return Boolean(signal.hourly_within_three);
-      }
       if (selectedFilter === "white-above-yellow") {
         return Boolean(signal.weekly_ai_white_above_yellow);
       }
@@ -1215,24 +1209,19 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const signedPercent = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "資料不足";
   const whiteStatus = document.createElement("p");
   whiteStatus.className = "weekly-white-status";
-  const hourlyText = signal.hourly_status_available
-    ? hourlyNumber > 0
-      ? `1H已站上白線第 ${hourlyNumber} 根（${signedPercent(hourlyDistance)}）`
-      : `1H尚未站上白線（${signedPercent(hourlyDistance)}）`
-    : "1H資料暫缺";
-  whiteStatus.textContent = `白線狀況｜首根開盤 ${signedPercent(signal.first_week_open_distance_pct)}；本週開盤 ${signedPercent(signal.week_open_distance_pct)}、收盤 ${signedPercent(signal.week_close_distance_pct)}｜${hourlyText}`;
+  whiteStatus.textContent = `週K白線狀況｜首根開盤 ${signedPercent(signal.first_week_open_distance_pct)}；本週開盤 ${signedPercent(signal.week_open_distance_pct)}、收盤 ${signedPercent(signal.week_close_distance_pct)}`;
   if (signal.hourly_status_available) {
     const hourly = document.createElement("span");
     hourly.className = signal.hourly_within_three ? "bonus" : "hourly-pending";
     hourly.textContent = hourlyNumber === 1
-      ? "1H 剛站回白線第 1 根 ＋80"
+      ? "1H 加分｜剛站回白線第 1 根 ＋80"
       : hourlyNumber === 2
-        ? "1H 站回白線第 2 根 ＋55"
+        ? "1H 加分｜站回白線第 2 根 ＋55"
         : hourlyNumber === 3
-          ? "1H 站回白線第 3 根 ＋35"
+          ? "1H 加分｜站回白線第 3 根 ＋35"
           : hourlyNumber > 3
-            ? `1H 站上白線已第 ${hourlyNumber} 根，不加即時分`
-            : "1H 尚未站上白線";
+            ? `1H 加分｜站上白線已第 ${hourlyNumber} 根，不加即時分`
+            : "1H 加分｜尚未站上白線";
     stateList.append(hourly);
   }
 
