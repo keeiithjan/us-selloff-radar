@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260820-monthly-score1">
+    <link rel="stylesheet" href="assets/styles.css?v=20260821-system-status3">
   </head>
   <body>
     <main class="shell">
@@ -32,6 +32,16 @@
           <p id="install-app-note" class="install-app-note" aria-live="polite" hidden></p>
         </div>
       </header>
+
+      <section id="system-status" class="system-status is-loading" aria-live="polite" aria-label="系統狀態">
+        <span class="system-status-dot" aria-hidden="true"></span>
+        <div class="system-status-copy">
+          <p class="eyebrow">SCANNER STATUS</p>
+          <strong id="system-status-title">正在讀取系統狀態</strong>
+          <p id="system-status-detail">檢查最新掃描資料與 GitHub Actions 執行狀態。</p>
+        </div>
+        <a id="system-status-log" class="system-status-log" href="https://github.com/keeiithjan/us-selloff-radar/actions" target="_blank" rel="noopener noreferrer">查看 Actions Log</a>
+      </section>
 
       <section class="market-pulse" aria-labelledby="market-pulse-title">
         <div class="section-heading">
@@ -59,58 +69,7 @@
         <div id="futures-strip" class="futures-strip" aria-live="polite"></div>
       </section>
 
-      <section class="sequential-monitor" aria-labelledby="sequential-title">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">MULTI-TIMEFRAME SEQUENTIAL</p>
-            <h2 id="sequential-title">TD Sequential 9／13 監測</h2>
-          </div>
-          <p id="sequential-updated" class="muted"></p>
-        </div>
-          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號產生後保留 8 根已完成 K 棒內（第 8 根仍顯示）。預設為買方標的；可切換賣方。字卡標示主力產品、TD 產生 K 棒相對於趨勢帶的位置，以及該週開盤是否高於白線。</p>
-        <div class="sequential-controls" aria-label="Sequential 篩選器">
-          <label for="sequential-market">市場
-            <select id="sequential-market">
-              <option value="all">全部市場</option>
-              <option value="美股">美股</option>
-              <option value="台股">台股</option>
-              <option value="幣安 USDT 永續">幣安 USDT 永續</option>
-              <option value="Pepperstone CFD">Pepperstone CFD</option>
-            </select>
-          </label>
-          <label for="sequential-sort">排列
-            <select id="sequential-sort">
-              <option value="newest">出現時間：最新優先</option>
-              <option value="oldest">出現時間：最早優先</option>
-            </select>
-          </label>
-          <label for="sequential-side">方向
-            <select id="sequential-side">
-              <option value="buy" selected>僅買方</option>
-              <option value="sell">僅賣方</option>
-              <option value="all">買方與賣方</option>
-            </select>
-          </label>
-          <label for="sequential-momentum">動能確認
-            <select id="sequential-momentum">
-              <option value="all">全部動能狀態</option>
-              <option value="confirmed">僅空方動能確認</option>
-            </select>
-          </label>
-          <button id="download-tradingview-list" class="download-list" type="button">下載 TradingView 上傳清單 .TXT</button>
-        </div>
-        <p id="tradingview-export-note" class="tradingview-export-note">匯出只包含做多 TD 標的；依市場、主力產品／產業與代號排序，同一標的跨週期僅保留一列。</p>
-        <section id="scan-progress" class="scan-progress" aria-live="polite" aria-label="掃描進度">
-          <div class="scan-progress-copy">
-            <span class="scan-progress-label">DATA SCAN</span>
-            <strong id="scan-progress-state">讀取監測資料</strong>
-          </div>
-          <div class="scan-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <span id="scan-progress-fill" class="scan-progress-fill"></span>
-          </div>
-          <span id="scan-progress-percent" class="scan-progress-percent">0%</span>
-          <p id="scan-progress-updated" class="scan-progress-updated">最後更新：等待資料</p>
-        </section>
+      <section class="sequential-monitor" aria-label="技術監測">
         <section class="weekly-reclaim-monitor" aria-labelledby="weekly-reclaim-title">
           <div class="section-heading weekly-reclaim-heading">
             <div>
@@ -118,6 +77,13 @@
               <h3 id="weekly-reclaim-title">週K｜白線收復篩選器</h3>
             </div>
             <div class="weekly-reclaim-actions">
+              <fieldset class="market-filter">
+                <legend>市場顯示</legend>
+                <label><input type="checkbox" name="market-filter" value="美股" checked>美股</label>
+                <label><input type="checkbox" name="market-filter" value="台股" checked>台股</label>
+                <label><input type="checkbox" name="market-filter" value="幣安 USDT 永續">幣安</label>
+                <label><input type="checkbox" name="market-filter" value="Pepperstone CFD">CFD</label>
+              </fieldset>
               <label for="weekly-reclaim-filter">週K篩選
                 <select id="weekly-reclaim-filter">
                   <option value="score">依結構分數排名</option>
@@ -125,6 +91,7 @@
                   <option value="third-foot">第 3 根週K剛收回白線</option>
                   <option value="first-foot">第 1 根週K剛收回白線</option>
                   <option value="white-above-yellow">週K 白線在黃線上方</option>
+                  <option value="previous-big-black-above-white">前一根週K白線上大黑K（實體跌幅≥3%）</option>
                 </select>
               </label>
               <button id="download-weekly-tradingview-list" class="download-list" type="button">匯出週線 TradingView 清單 .TXT</button>
@@ -133,6 +100,51 @@
           <p class="sequential-note">週K區完全依照 KJ 白線黃線＋1H Screener V12 的週線規則：必須「整根週K實體」都在 AI 白線下方，才是有效跌破；首根站回必須收盤重新站上白線。只追蹤站回後第 1～3 根，且目前這根週K的開盤與收盤都必須在白線上方。第 2 根與第 3 根若盤中跌破白線 0.1% 後收回，依序為最高／次高優先；週K只要求白線在黃線上方。1H 不屬於週K篩選條件，只會在符合週K條件後列為額外加分。</p>
           <p id="weekly-reclaim-export-note" class="tradingview-export-note"></p>
           <div id="weekly-reclaim-signals" class="weekly-reclaim-signals" aria-live="polite"></div>
+        </section>
+        <section class="td-monitor" aria-labelledby="sequential-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MULTI-TIMEFRAME SEQUENTIAL</p>
+              <h2 id="sequential-title">TD Sequential 9／13 監測</h2>
+            </div>
+            <p id="sequential-updated" class="muted"></p>
+          </div>
+          <p class="sequential-note">僅顯示 Setup 9 與 Countdown 13；訊號產生後保留 8 根已完成 K 棒內（第 8 根仍顯示）。預設為買方標的；可切換賣方。字卡標示主力產品、TD 產生 K 棒相對於趨勢帶的位置，以及該週開盤是否高於白線。</p>
+          <div class="sequential-controls" aria-label="TD 與市場篩選器">
+            <label for="sequential-sort">排列
+              <select id="sequential-sort">
+                <option value="newest">出現時間：最新優先</option>
+                <option value="oldest">出現時間：最早優先</option>
+              </select>
+            </label>
+            <label for="sequential-side">方向
+              <select id="sequential-side">
+                <option value="buy" selected>僅買方</option>
+                <option value="sell">僅賣方</option>
+                <option value="all">買方與賣方</option>
+              </select>
+            </label>
+            <label for="sequential-momentum">動能確認
+              <select id="sequential-momentum">
+                <option value="all">全部動能狀態</option>
+                <option value="confirmed">僅空方動能確認</option>
+              </select>
+            </label>
+            <button id="download-tradingview-list" class="download-list" type="button">下載 TradingView 上傳清單 .TXT</button>
+          </div>
+          <p id="tradingview-export-note" class="tradingview-export-note">市場顯示由上方控制；預設僅顯示台股與美股。匯出只包含目前篩選的做多 TD 標的，依市場、主力產品／產業與代號排序，同一標的跨週期僅保留一列。</p>
+          <section id="scan-progress" class="scan-progress" aria-live="polite" aria-label="掃描進度">
+            <div class="scan-progress-copy">
+              <span class="scan-progress-label">DATA SCAN</span>
+              <strong id="scan-progress-state">讀取監測資料</strong>
+            </div>
+            <div class="scan-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="scan-progress-fill" class="scan-progress-fill"></span>
+            </div>
+            <span id="scan-progress-percent" class="scan-progress-percent">0%</span>
+            <p id="scan-progress-updated" class="scan-progress-updated">最後更新：等待資料</p>
+          </section>
+          <div id="sequential-frames" class="sequential-frames" aria-live="polite"></div>
         </section>
         <div class="trend-reclaim-monitor" aria-labelledby="trend-reclaim-title">
           <div class="section-heading">
@@ -144,7 +156,6 @@
           <p class="sequential-note">僅做多，監測 15 分鐘與 1 小時：從死亡交叉到回站期間，K 棒實體（開盤與收盤）、AI Momentum 白線與黃線必須全程都在 TT（EMA 50／100）趨勢帶下方；任一根實體進入趨勢帶即作廢。其後 30 根完成 K 棒內，收盤由下往上站回白線，且白線仍在黃線下方。訊號後 8 根完成 K 棒內的回站訊號才會顯示。</p>
           <div id="trend-reclaim-frames" class="trend-reclaim-frames" aria-live="polite"></div>
         </div>
-        <div id="sequential-frames" class="sequential-frames" aria-live="polite"></div>
         <p id="sequential-source" class="sequential-source"></p>
         <section class="download-hub" aria-labelledby="download-hub-title">
           <p class="eyebrow">WATCHLIST DOWNLOADS</p>
@@ -163,6 +174,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260820-monthly-score1"></script>
+    <script src="assets/app.js?v=20260821-system-status3"></script>
   </body>
 </html>

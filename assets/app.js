@@ -2,10 +2,14 @@ const elements = {
   refresh: document.querySelector("#refresh"),
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
+  systemStatus: document.querySelector("#system-status"),
+  systemStatusTitle: document.querySelector("#system-status-title"),
+  systemStatusDetail: document.querySelector("#system-status-detail"),
+  systemStatusLog: document.querySelector("#system-status-log"),
   sequentialFrames: document.querySelector("#sequential-frames"),
   sequentialUpdated: document.querySelector("#sequential-updated"),
   sequentialSource: document.querySelector("#sequential-source"),
-  sequentialMarket: document.querySelector("#sequential-market"),
+  marketFilters: [...document.querySelectorAll('input[name="market-filter"]')],
   sequentialSort: document.querySelector("#sequential-sort"),
   sequentialSide: document.querySelector("#sequential-side"),
   sequentialMomentum: document.querySelector("#sequential-momentum"),
@@ -30,6 +34,10 @@ let sequentialPayload = null;
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
+const ACTIONS_PAGE_URL = "https://github.com/keeiithjan/us-selloff-radar/actions";
+const ACTIONS_RUNS_URL = "https://api.github.com/repos/keeiithjan/us-selloff-radar/actions/workflows/scan-and-deploy.yml/runs?per_page=1";
+const ACTIONS_POLL_INTERVAL_MS = 5 * 60 * 1000;
+let latestWorkflowResult = { run: null, error: null, checkedAt: 0 };
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const motionState = {
   futures: new Map(),
@@ -153,6 +161,70 @@ function formatTaipei(value) {
   }).format(new Date(value));
 }
 
+function scanErrors(payload) {
+  return Array.isArray(payload?.scan_errors)
+    ? payload.scan_errors.map((error) => String(error).trim()).filter(Boolean)
+    : [];
+}
+
+function workflowStateDetail(run) {
+  if (!run) return "GitHub Actions 狀態暫時無法讀取";
+  const status = String(run.status || "");
+  if (["queued", "requested", "waiting"].includes(status)) return "GitHub Actions 正在等待執行器";
+  if (status === "in_progress") return "GitHub Actions 正在掃描並部署最新資料";
+  const conclusion = String(run.conclusion || "");
+  return {
+    success: "GitHub Actions 最近一次執行成功",
+    failure: "GitHub Actions 最近一次執行失敗",
+    cancelled: "GitHub Actions 最近一次執行已取消",
+    timed_out: "GitHub Actions 最近一次執行逾時",
+    action_required: "GitHub Actions 需要人工處理",
+  }[conclusion] || "GitHub Actions 最近一次執行已結束";
+}
+
+function renderSystemStatus(payload, run, workflowError = null) {
+  if (!elements.systemStatus) return;
+  const errors = scanErrors(payload);
+  const updatedAt = payload?.updated_at_utc;
+  const updatedAtText = updatedAt ? `資料更新：${formatTaipei(updatedAt)}` : "尚未取得最新資料時間";
+  const status = String(run?.status || "");
+  const conclusion = String(run?.conclusion || "");
+  const running = ["queued", "requested", "waiting", "in_progress"].includes(status);
+  const failed = status === "completed" && !["success", "neutral", "skipped"].includes(conclusion);
+  const isStale = updatedAt && Number.isFinite(Date.parse(updatedAt))
+    && Date.now() - Date.parse(updatedAt) > 100 * 60 * 1000;
+  let level = "success";
+  let title = "資料掃描正常";
+  const details = [updatedAtText];
+
+  if (running) {
+    level = "running";
+    title = "掃描與部署進行中";
+  } else if (failed) {
+    level = "error";
+    title = "最近一次掃描失敗";
+  } else if (errors.length || isStale || workflowError) {
+    level = "warning";
+    title = errors.length
+      ? `掃描完成，但 ${errors.length} 個來源有警告`
+      : isStale
+        ? "資料更新可能延遲"
+        : "資料正常，Actions 狀態暫時無法讀取";
+  }
+
+  details.push(workflowStateDetail(run));
+  if (errors.length) details.push(`來源警告：${errors.join("、")}`);
+  if (workflowError) details.push("可開啟 Actions Log 查看即時執行紀錄");
+
+  elements.systemStatus.className = `system-status is-${level}`;
+  elements.systemStatusTitle.textContent = title;
+  elements.systemStatusDetail.textContent = details.join("｜");
+  if (elements.systemStatusLog) {
+    elements.systemStatusLog.href = run?.html_url || ACTIONS_PAGE_URL;
+    elements.systemStatusLog.textContent = running ? "查看即時 Actions Log" : "查看 Actions Log";
+  }
+}
+
 function makeTextPair(label, value) {
   const labelNode = document.createElement("span");
   labelNode.textContent = label;
@@ -209,6 +281,18 @@ function industryText(item) {
 
 function displayMarket(market) {
   return market === "台股個股期貨標的" ? "台股" : (market || "市場");
+}
+
+function selectedMarkets() {
+  return new Set(
+    elements.marketFilters
+      .filter((control) => control.checked)
+      .map((control) => control.value)
+  );
+}
+
+function isSelectedMarket(signal, markets = selectedMarkets()) {
+  return markets.has(displayMarket(signal?.market));
 }
 
 function makeTodayChange(value, label = "今日漲跌") {
@@ -791,12 +875,12 @@ function makeSequentialSignal(signal, interval) {
 }
 
 function filteredTrendReclaims(frame) {
-  const selectedMarket = elements.sequentialMarket.value;
+  const markets = selectedMarkets();
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
   const signals = (Array.isArray(frame.trend_reclaim_signals) ? frame.trend_reclaim_signals : [])
     .filter((signal) => signal.side === "buy" && signal.signal_type === "long_reclaim");
   return signals
-    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .filter((signal) => isSelectedMarket(signal, markets))
     .sort((left, right) => {
       const leftTime = Date.parse(left.occurred_at_utc || 0);
       const rightTime = Date.parse(right.occurred_at_utc || 0);
@@ -910,12 +994,12 @@ function plainQuote(value) {
 }
 
 function filteredWeeklyReclaims(frame) {
-  const selectedMarket = elements.sequentialMarket.value;
+  const markets = selectedMarkets();
   const selectedFilter = elements.weeklyReclaimFilter?.value || "score";
   const signals = Array.isArray(frame?.signals) ? frame.signals : [];
   return signals
     .filter((signal) => signal.side === "buy" && signal.signal_type === "weekly_white_reclaim")
-    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .filter((signal) => isSelectedMarket(signal, markets))
     .filter((signal) => {
       if (selectedFilter === "second-foot") {
         return Boolean(signal.second_foot_now);
@@ -928,6 +1012,9 @@ function filteredWeeklyReclaims(frame) {
       }
       if (selectedFilter === "white-above-yellow") {
         return Boolean(signal.weekly_ai_white_above_yellow);
+      }
+      if (selectedFilter === "previous-big-black-above-white") {
+        return Boolean(signal.previous_week_big_black_above_white);
       }
       return true;
     })
@@ -978,7 +1065,7 @@ function makeLegacyWeeklyReclaimSignal(signal, interval) {
   recovery.textContent = `實體跌破後第 ${Number(signal.weeks_to_reclaim || 0)} 週開盤站回`;
   const score = document.createElement("span");
   score.className = "weekly-score";
-  score.textContent = `結構分數 ${Number(signal.score || 0)}`;
+  score.textContent = `結構分數 ${Number(signal.score || 0)}%`;
   details.append(industry, recovery, score);
 
   const timeline = document.createElement("p");
@@ -1160,7 +1247,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   recovery.textContent = `整根實體跌破後第 ${Number(signal.weeks_to_reclaim || 0)} 根收盤站回`;
   const score = document.createElement("span");
   score.className = "weekly-score";
-  score.textContent = `結構分數 ${Number(signal.score || 0)}`;
+  score.textContent = `結構分數 ${Number(signal.score || 0)}%`;
   details.append(industry, recovery, score);
 
   const timeline = document.createElement("p");
@@ -1196,7 +1283,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
   weeklyAiStatus.className = "weekly-white-status weekly-ai-status";
   if (signal.weekly_ai_white_yellow_available) {
     if (signal.weekly_ai_white_above_yellow) {
-      weeklyAiStatus.textContent = "週K白線位於黃線上方（+100）；不要求近期黃金交叉";
+      weeklyAiStatus.textContent = "週K白線位於黃線上方（+10%）；不要求近期黃金交叉";
     } else {
       weeklyAiStatus.textContent = "週K白線仍在黃線下方；不給白黃趨勢加分";
     }
@@ -1207,6 +1294,12 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const hourlyNumber = Number(signal.hourly_bar_number || 0);
   const hourlyDistance = Number(signal.hourly_white_distance_pct);
   const signedPercent = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "資料不足";
+  if (signal.previous_week_big_black_above_white) {
+    const previousBlack = document.createElement("span");
+    previousBlack.className = "strong-bonus";
+    previousBlack.textContent = `前一根週K｜白線上大黑K（實體 ${signedPercent(signal.previous_week_body_change_pct)}）`;
+    stateList.append(previousBlack);
+  }
   const whiteStatus = document.createElement("p");
   whiteStatus.className = "weekly-white-status";
   whiteStatus.textContent = `週K白線狀況｜首根開盤 ${signedPercent(signal.first_week_open_distance_pct)}；本週開盤 ${signedPercent(signal.week_open_distance_pct)}、收盤 ${signedPercent(signal.week_close_distance_pct)}`;
@@ -1214,11 +1307,11 @@ function makeWeeklyReclaimSignal(signal, interval) {
     const hourly = document.createElement("span");
     hourly.className = signal.hourly_within_three ? "bonus" : "hourly-pending";
     hourly.textContent = hourlyNumber === 1
-      ? "1H 加分｜剛站回白線第 1 根 ＋80"
+      ? "1H 加分｜剛站回白線第 1 根 ＋10%"
       : hourlyNumber === 2
-        ? "1H 加分｜站回白線第 2 根 ＋55"
+        ? "1H 加分｜站回白線第 2 根 ＋7%"
         : hourlyNumber === 3
-          ? "1H 加分｜站回白線第 3 根 ＋35"
+          ? "1H 加分｜站回白線第 3 根 ＋4%"
           : hourlyNumber > 3
             ? `1H 加分｜站上白線已第 ${hourlyNumber} 根，不加即時分`
             : "1H 加分｜尚未站上白線";
@@ -1229,7 +1322,7 @@ function makeWeeklyReclaimSignal(signal, interval) {
     monthly.className = signal.monthly_above_white ? "monthly-bonus" : "hourly-pending";
     const monthlyDistance = signedPercent(Number(signal.monthly_white_distance_pct));
     monthly.textContent = signal.monthly_above_white
-      ? `月線加分｜收盤在 AI 白線上方 ${monthlyDistance} ＋70`
+      ? `月線加分｜收盤在 AI 白線上方 ${monthlyDistance} ＋10%`
       : `月線未站上 AI 白線（${monthlyDistance}）`;
     stateList.append(monthly);
   } else {
@@ -1285,13 +1378,13 @@ function renderWeeklyReclaims(payload) {
 }
 
 function filteredSignals(frame) {
-  const selectedMarket = elements.sequentialMarket.value;
+  const markets = selectedMarkets();
   const selectedSide = elements.sequentialSide.value;
   const selectedMomentum = elements.sequentialMomentum.value;
   const multiplier = elements.sequentialSort.value === "oldest" ? 1 : -1;
   const signals = Array.isArray(frame.signals) ? frame.signals : [];
   return signals
-    .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
+    .filter((signal) => isSelectedMarket(signal, markets))
     .filter((signal) => selectedSide === "all" || signal.side === selectedSide)
     .filter((signal) => selectedMomentum === "all" || Boolean(signal.momentum && signal.momentum.bearish_confirmed))
     .sort((left, right) => {
@@ -1328,13 +1421,13 @@ function compareExportSignals(left, right) {
 
 function selectedSignalsForExport() {
   const frames = Array.isArray(sequentialPayload?.timeframes) ? sequentialPayload.timeframes : [];
-  const selectedMarket = elements.sequentialMarket.value;
+  const markets = selectedMarkets();
   const unique = new Map();
   for (const frame of frames) {
     const signals = Array.isArray(frame.signals) ? frame.signals : [];
     for (const signal of signals) {
       if (signal.side !== "buy") continue;
-      if (selectedMarket !== "all" && signal.market !== selectedMarket) continue;
+      if (!isSelectedMarket(signal, markets)) continue;
       const symbol = tradingViewImportSymbol(signal);
       if (!symbol) continue;
       const previous = unique.get(symbol);
@@ -1464,18 +1557,43 @@ async function loadJson(path) {
   return response.json();
 }
 
+async function loadLatestWorkflowRun() {
+  const response = await fetch(ACTIONS_RUNS_URL, {
+    cache: "no-store",
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!response.ok) throw new Error(`無法讀取 GitHub Actions 狀態（${response.status}）`);
+  const payload = await response.json();
+  return Array.isArray(payload.workflow_runs) ? payload.workflow_runs[0] || null : null;
+}
+
+async function loadCurrentWorkflowStatus() {
+  if (Date.now() - latestWorkflowResult.checkedAt < ACTIONS_POLL_INTERVAL_MS) {
+    return latestWorkflowResult;
+  }
+  try {
+    latestWorkflowResult = { run: await loadLatestWorkflowRun(), error: null, checkedAt: Date.now() };
+  } catch (error) {
+    latestWorkflowResult = { run: null, error, checkedAt: Date.now() };
+  }
+  return latestWorkflowResult;
+}
+
 async function refresh() {
   elements.refresh.disabled = true;
   elements.refresh.textContent = "更新中…";
   try {
-    const [sequential, market] = await Promise.all([
+    const [sequential, market, workflowResult] = await Promise.all([
       loadJson("data/sequential.json"),
       loadJson("data/market.json"),
+      loadCurrentWorkflowStatus(),
     ]);
     renderSequential(sequential);
     renderMarketPulse(market);
+    renderSystemStatus(sequential, workflowResult.run, workflowResult.error);
   } catch (error) {
     elements.sequentialSource.textContent = "資料讀取失敗；請稍後重試，或查看 GitHub Actions 的最近執行結果。";
+    renderSystemStatus(null, null, error);
     console.error(error);
   } finally {
     elements.refresh.disabled = false;
@@ -1551,9 +1669,11 @@ window.addEventListener("appinstalled", () => {
 
 elements.refresh.addEventListener("click", refresh);
 if (elements.installApp) elements.installApp.addEventListener("click", installApp);
-elements.sequentialMarket.addEventListener("change", () => {
-  if (sequentialPayload) renderSequential(sequentialPayload);
-});
+for (const marketFilter of elements.marketFilters) {
+  marketFilter.addEventListener("change", () => {
+    if (sequentialPayload) renderSequential(sequentialPayload);
+  });
+}
 elements.sequentialSort.addEventListener("change", () => {
   if (sequentialPayload) renderSequential(sequentialPayload);
 });

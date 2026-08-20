@@ -167,8 +167,12 @@ WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
 WEEKLY_BREAK_MARGIN = 0.001
 WEEKLY_GOLDEN_CROSS_LOOKBACK_WEEKS = 4
-HOURLY_WHITE_RECLAIM_BONUS = {1: 80, 2: 55, 3: 35}
-MONTHLY_WHITE_ABOVE_BONUS = 70
+# The weekly ranking is deliberately bounded to a 0–100 score so it can be
+# read as a percentage-style structural quality score in the UI.
+WEEKLY_SCORE_MAX = 100
+HOURLY_WHITE_RECLAIM_BONUS = {1: 10, 2: 7, 3: 4}
+MONTHLY_WHITE_ABOVE_BONUS = 10
+WEEKLY_BIG_BLACK_BODY_MIN_PCT = 3.0
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -1287,24 +1291,39 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         else 0.0
     )
 
-    # The requested priority is second week foot > third week foot > the
-    # first week.  It keeps the Pine conditions but gives the user's preferred
-    # "第 2 根／第 3 根剛收回" setup the top ranking.
-    score = 1000
-    if age_weeks == 0:
-        score = 2000
-    if first_foot:
-        score = max(score, 3000)
+    # A bounded percentage-style score keeps the priority order explicit:
+    # second foot > third foot > first foot > a plain fresh reclaim.  The
+    # remaining points are awarded to independent trend/timeframe evidence.
+    score = {0: 30, 1: 24, 2: 18}.get(age_weeks, 0)
     if first_foot_now:
-        score = max(score, 4000)
+        score = 40
     if third_foot:
-        score = max(score, 5000)
+        score = 50
     if second_foot:
-        score = max(score, 6000)
+        score = 60
     if float(current["white"]) > float(current["yellow"]):
-        score += 100
+        score += 10
     if current_foot:
-        score += int(max(0.0, foot_depth_pct) * 10)
+        score += min(10, int(max(0.0, foot_depth_pct) * 10))
+
+    previous_week_big_black_above_white = False
+    previous_week_body_change_pct: float | None = None
+    previous_position = latest - 1
+    if previous_position >= 0 and valid(previous_position):
+        previous = features.iloc[previous_position]
+        previous_open = float(previous["open"])
+        previous_close = float(previous["close"])
+        if previous_open != 0:
+            previous_week_body_change_pct = (previous_close / previous_open - 1) * 100
+            previous_body_above_white = (
+                previous_open > float(previous["white_at_open"])
+                and previous_close > float(previous["white"])
+            )
+            previous_week_big_black_above_white = bool(
+                previous_body_above_white
+                and previous_close < previous_open
+                and abs(previous_week_body_change_pct) >= WEEKLY_BIG_BLACK_BODY_MIN_PCT
+            )
 
     first_open_distance_pct = (float(first["open"]) / float(first["white_at_open"]) - 1) * 100
     current_open_distance_pct = (float(current["open"]) / float(current["white_at_open"]) - 1) * 100
@@ -1340,7 +1359,13 @@ def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
         "week_close": round(float(current["close"]), 8),
         "white_line": round(float(current["white"]), 8),
         "white_at_open": round(float(current["white_at_open"]), 8),
-        "score": score,
+        "previous_week_big_black_above_white": previous_week_big_black_above_white,
+        "previous_week_body_change_pct": (
+            round(previous_week_body_change_pct, 4)
+            if previous_week_body_change_pct is not None
+            else None
+        ),
+        "score": min(WEEKLY_SCORE_MAX, score),
     }
 
 
@@ -1741,13 +1766,17 @@ def collect_weekly_reclaims(
         )
         signal.update(hourly_state)
         hourly_bar_number = int(hourly_state.get("hourly_bar_number", 0))
-        signal["score"] = int(signal["score"]) + HOURLY_WHITE_RECLAIM_BONUS.get(
-            hourly_bar_number, 0
+        signal["score"] = min(
+            WEEKLY_SCORE_MAX,
+            int(signal["score"]) + HOURLY_WHITE_RECLAIM_BONUS.get(hourly_bar_number, 0),
         )
         monthly_state = monthly_white_status(monthly_by_ticker.get(instrument.ticker))
         signal.update(monthly_state)
         if bool(monthly_state["monthly_above_white"]):
-            signal["score"] = int(signal["score"]) + MONTHLY_WHITE_ABOVE_BONUS
+            signal["score"] = min(
+                WEEKLY_SCORE_MAX,
+                int(signal["score"]) + MONTHLY_WHITE_ABOVE_BONUS,
+            )
         signal["direct_focus"] = bool(
             signal["week_white_structure_active"]
             and (signal["second_foot_now"] or signal["third_foot_now"])
@@ -1856,6 +1885,7 @@ def write_payload(
     payload = {
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "market_status": "open" if is_regular_session(now) else "closed",
+        "scan_errors": errors,
         "source": source,
         "timeframes": frame_list,
         "weekly_reclaim": weekly_reclaim,
