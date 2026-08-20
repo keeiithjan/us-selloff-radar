@@ -162,11 +162,13 @@ TIMEFRAMES = (
 # wants the week's opening position and an intraweek drop/reclaim to count
 # before Friday's close, so it is collected outside the confirmed-TD frames.
 WEEKLY_RECLAIM_TIMEFRAME = Timeframe("1w", "週線", "1wk", "10y", "W", None)
+MONTHLY_WHITE_TIMEFRAME = Timeframe("1M", "月線", "1mo", "10y", "M", None)
 WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
 WEEKLY_BREAK_MARGIN = 0.001
 WEEKLY_GOLDEN_CROSS_LOOKBACK_WEEKS = 4
 HOURLY_WHITE_RECLAIM_BONUS = {1: 80, 2: 55, 3: 35}
+MONTHLY_WHITE_ABOVE_BONUS = 70
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -175,6 +177,7 @@ MOMENTUM_TIMEFRAME_KEYS = {"15m", "1h"}
 KERNEL_LOOKBACK = 8
 KERNEL_RELATIVE_WEIGHT = 8.0
 KERNEL_START_BAR = 25
+MONTHLY_WHITE_MINIMUM_BARS = KERNEL_LOOKBACK + KERNEL_START_BAR + 1
 ZONE_INSIDE_LENGTH = 50
 ZONE_OUTSIDE_LENGTH = 75
 MOMENTUM_SMOOTHING_LENGTH = 14
@@ -1160,6 +1163,42 @@ def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def monthly_white_status(raw: pd.DataFrame | None) -> dict[str, object]:
+    """Return the current monthly AI white-line relation for ranking only."""
+    unavailable: dict[str, object] = {
+        "monthly_white_available": False,
+        "monthly_above_white": False,
+        "monthly_close": None,
+        "monthly_white_line": None,
+        "monthly_white_distance_pct": None,
+    }
+    if raw is None or "Close" not in raw.columns:
+        return unavailable
+    frame = raw.dropna(subset=["Close"]).copy().sort_index()
+    if len(frame) < MONTHLY_WHITE_MINIMUM_BARS:
+        return unavailable
+    close = pd.to_numeric(frame["Close"], errors="coerce")
+    white = rational_quadratic(close)
+    monthly_close = float(close.iloc[-1])
+    monthly_white = float(white.iloc[-1])
+    if not np.isfinite(monthly_close) or not np.isfinite(monthly_white) or monthly_white == 0:
+        return unavailable
+    # Kernel arithmetic can leave a constant series at 99.99999999999999.
+    # Treat numerical equality as equal, while keeping the Pine-style strict
+    # "close above white" comparison for an actual price difference.
+    monthly_above_white = bool(
+        monthly_close > monthly_white
+        and not np.isclose(monthly_close, monthly_white, rtol=1e-10, atol=1e-8)
+    )
+    return {
+        "monthly_white_available": True,
+        "monthly_above_white": monthly_above_white,
+        "monthly_close": round(monthly_close, 8),
+        "monthly_white_line": round(monthly_white, 8),
+        "monthly_white_distance_pct": round((monthly_close / monthly_white - 1) * 100, 4),
+    }
+
+
 def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
     """Return the active weekly recovery using the supplied Pine V12 rules.
 
@@ -1677,6 +1716,20 @@ def collect_weekly_reclaims(
     hourly_records = download_yahoo_records(yahoo_hourly_candidates, hourly_timeframe)
     hourly_records.extend(download_binance_records(binance_hourly_candidates, hourly_timeframe))
     hourly_by_ticker = {instrument.ticker: raw for instrument, raw in hourly_records}
+    monthly_timeframe = MONTHLY_WHITE_TIMEFRAME
+    yahoo_monthly_candidates = [
+        instrument
+        for _, instrument, _ in weekly_candidates
+        if instrument.market != "幣安 USDT 永續"
+    ]
+    binance_monthly_candidates = [
+        instrument
+        for _, instrument, _ in weekly_candidates
+        if instrument.market == "幣安 USDT 永續"
+    ]
+    monthly_records = download_yahoo_records(yahoo_monthly_candidates, monthly_timeframe)
+    monthly_records.extend(download_binance_records(binance_monthly_candidates, monthly_timeframe))
+    monthly_by_ticker = {instrument.ticker: raw for instrument, raw in monthly_records}
     for signal, instrument, weekly_reclaim_index in weekly_candidates:
         hourly_raw = hourly_by_ticker.get(instrument.ticker)
         hourly_state = (
@@ -1691,6 +1744,10 @@ def collect_weekly_reclaims(
         signal["score"] = int(signal["score"]) + HOURLY_WHITE_RECLAIM_BONUS.get(
             hourly_bar_number, 0
         )
+        monthly_state = monthly_white_status(monthly_by_ticker.get(instrument.ticker))
+        signal.update(monthly_state)
+        if bool(monthly_state["monthly_above_white"]):
+            signal["score"] = int(signal["score"]) + MONTHLY_WHITE_ABOVE_BONUS
         signal["direct_focus"] = bool(
             signal["week_white_structure_active"]
             and (signal["second_foot_now"] or signal["third_foot_now"])

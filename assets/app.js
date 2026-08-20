@@ -1224,6 +1224,20 @@ function makeWeeklyReclaimSignal(signal, interval) {
             : "1H 加分｜尚未站上白線";
     stateList.append(hourly);
   }
+  if (signal.monthly_white_available) {
+    const monthly = document.createElement("span");
+    monthly.className = signal.monthly_above_white ? "monthly-bonus" : "hourly-pending";
+    const monthlyDistance = signedPercent(Number(signal.monthly_white_distance_pct));
+    monthly.textContent = signal.monthly_above_white
+      ? `月線加分｜收盤在 AI 白線上方 ${monthlyDistance} ＋70`
+      : `月線未站上 AI 白線（${monthlyDistance}）`;
+    stateList.append(monthly);
+  } else {
+    const monthlyUnavailable = document.createElement("span");
+    monthlyUnavailable.className = "hourly-pending";
+    monthlyUnavailable.textContent = "月線白線資料暫缺";
+    stateList.append(monthlyUnavailable);
+  }
 
   const values = (Array.isArray(signal.sparkline) ? signal.sparkline : []).map(Number).filter(Number.isFinite);
   const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
@@ -1238,7 +1252,10 @@ function makeWeeklyReclaimSignal(signal, interval) {
   const hourlyValues = signal.hourly_status_available
     ? ` ｜ 1H C ${plainQuote(signal.hourly_close)} / 白線 ${plainQuote(signal.hourly_white_line)}`
     : "";
-  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線（開盤基準）${plainQuote(signal.white_at_open)} ／ 目前 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}`;
+  const monthlyValues = signal.monthly_white_available
+    ? ` ｜ 月 C ${plainQuote(signal.monthly_close)} / 白線 ${plainQuote(signal.monthly_white_line)}`
+    : "";
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線（開盤基準）${plainQuote(signal.white_at_open)} ／ 目前 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}${monthlyValues}`;
 
   card.append(top, details, timeline, stateList, whiteStatus, weeklyAiStatus);
   if (sparkline) card.append(sparkline);
