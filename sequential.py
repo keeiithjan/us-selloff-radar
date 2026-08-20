@@ -164,14 +164,9 @@ TIMEFRAMES = (
 WEEKLY_RECLAIM_TIMEFRAME = Timeframe("1w", "週線", "1wk", "10y", "W", None)
 WEEKLY_RECLAIM_LOOKBACK_WEEKS = 3
 WEEKLY_RECLAIM_VISIBLE_WEEKS = 2
-WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS = 30
-WEEKLY_OPEN_CLOSE_BONUS = 12
-WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT = 1.5
-WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS = 8
+WEEKLY_BREAK_MARGIN = 0.001
 WEEKLY_GOLDEN_CROSS_LOOKBACK_WEEKS = 4
-HOURLY_WHITE_ABOVE_BONUS = 15
-HOURLY_SECOND_RECLAIM_BONUS = 35
-HOURLY_SECOND_RECLAIM_RECENCY_BARS = 4
+HOURLY_WHITE_RECLAIM_BONUS = {1: 80, 2: 55, 3: 35}
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -1166,167 +1161,146 @@ def weekly_white_features(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def weekly_reclaim_event(features: pd.DataFrame) -> dict[str, object] | None:
-    """Return the active long-only weekly white-line recovery.
+    """Return the active weekly recovery using the supplied Pine V12 rules.
 
-    The *only* entry rule is the user's weekly structure:
-
-    1. A prior completed weekly candle actually closed below the AI Momentum
-       white line (the breakdown).
-    2. The first week after that breakdown opens at / above the previous
-       completed white line (the stand-back-above event).
-
-    A first-week intrabar pullback-and-close-back-above, current close above
-    white, the white/yellow death cross below Trend Trader's ribbon, and the
-    hourly state are useful confirmations.  They must never remove a valid
-    opening recovery; they only change the score, labels, or optional filters.
+    This deliberately mirrors the Pine series logic instead of inferring a
+    recovery from a close alone.  A breakdown needs the *entire body* below
+    the white line.  The first recovery week must close above white after the
+    break, and the current bar is only kept for the first three weeks when its
+    open (vs. prior white) and close (vs. current white) remain above white.
     """
     if len(features) < WEEKLY_AI_MINIMUM_BARS:
         return None
     latest = len(features) - 1
-    last = features.iloc[latest]
-    required = (last["open"], last["low"], last["close"], last["white"], last["white_at_open"])
-    if not all(np.isfinite(float(value)) for value in required):
+    required_columns = ("open", "low", "close", "white", "yellow", "white_at_open")
+    if any(column not in features for column in required_columns):
         return None
-    last_white = float(last["white"])
-    white_at_open = float(last["white_at_open"])
-    tolerance = max(abs(last_white) * 0.0005, 0.01)
-    open_tolerance = max(abs(white_at_open) * 0.0005, 0.01)
-    week_open_above = float(last["open"]) >= white_at_open - open_tolerance
-    week_close_above = float(last["close"]) > last_white + tolerance
-    selected: dict[str, int | None] | None = None
-    breakdown_start = max(0, latest - WEEKLY_RECLAIM_LOOKBACK_WEEKS)
-    # Search the latest actual breakdown first.  Its immediately following
-    # week is the only possible first stand-back-above week; later close
-    # crosses are confirmations, not a replacement for that opening event.
-    for break_position in range(latest - 1, breakdown_start - 1, -1):
-        broken = features.iloc[break_position]
-        broken_values = (broken["close"], broken["white"])
-        if not all(np.isfinite(float(value)) for value in broken_values):
-            continue
-        broken_white = float(broken["white"])
-        broken_tolerance = max(abs(broken_white) * 0.0005, 0.01)
-        if float(broken["close"]) >= broken_white - broken_tolerance:
-            continue
 
-        reclaim_position = break_position + 1
-        reclaim = features.iloc[reclaim_position]
-        reclaim_values = (reclaim["open"], reclaim["white_at_open"])
-        if not all(np.isfinite(float(value)) for value in reclaim_values):
+    def valid(position: int) -> bool:
+        row = features.iloc[position]
+        return all(np.isfinite(float(row[column])) for column in required_columns)
+
+    def body_below(position: int) -> bool:
+        row = features.iloc[position]
+        return max(float(row["open"]), float(row["close"])) < float(row["white"])
+
+    def stand_above(position: int) -> bool:
+        row = features.iloc[position]
+        return float(row["close"]) > float(row["white"])
+
+    first_position: int | None = None
+    break_position: int | None = None
+    # Pine's ta.barssince() uses the most recent firstStandEvent.  It can be
+    # the current bar, or one/two bars ago while remaining inside keepBars=3.
+    for position in range(latest, max(0, latest - WEEKLY_RECLAIM_VISIBLE_WEEKS) - 1, -1):
+        if position < 1 or not valid(position) or not valid(position - 1):
             continue
-        reclaim_white_at_open = float(reclaim["white_at_open"])
-        reclaim_open_tolerance = max(abs(reclaim_white_at_open) * 0.0005, 0.01)
-        first_week_open_above = float(reclaim["open"]) >= (
-            reclaim_white_at_open - reclaim_open_tolerance
+        break_one = position >= 1 and valid(position - 1) and body_below(position - 1)
+        break_two = (
+            position >= 2
+            and valid(position - 2)
+            and body_below(position - 2)
+            and not stand_above(position - 1)
         )
-        if not first_week_open_above:
+        break_three = (
+            position >= 3
+            and valid(position - 3)
+            and body_below(position - 3)
+            and not stand_above(position - 2)
+            and not stand_above(position - 1)
+        )
+        first_stand = stand_above(position) and not stand_above(position - 1) and (
+            break_one or break_two or break_three
+        )
+        if not first_stand:
             continue
-
-        # This confirmation is intentionally optional.  It remains visible
-        # in the card and can be selected in the UI, but cannot discard the
-        # primary weekly opening-recovery signal.
-        death_cross_position: int | None = None
-        death_start = max(1, break_position - WEEKLY_DEATH_CROSS_LOOKBACK_WEEKS)
-        for death_position in range(break_position, death_start - 1, -1):
-            death = features.iloc[death_position]
-            prior_death = features.iloc[death_position - 1]
-            death_values = (
-                death["white"], death["yellow"], death["trend_lower_edge"],
-                prior_death["white"], prior_death["yellow"],
-            )
-            if not all(np.isfinite(float(value)) for value in death_values):
-                continue
-            death_white = float(death["white"])
-            death_yellow = float(death["yellow"])
-            death_lower_edge = float(death["trend_lower_edge"])
-            death_tolerance = max(abs(death_white) * 0.0005, 0.01)
-            ribbon_tolerance = max(abs(death_lower_edge) * 0.0005, 0.01)
-            crossed_down = (
-                float(prior_death["white"]) >= float(prior_death["yellow"]) - death_tolerance
-                and death_white < death_yellow - death_tolerance
-            )
-            below_ribbon = max(death_white, death_yellow) < death_lower_edge - ribbon_tolerance
-            if crossed_down and below_ribbon:
-                death_cross_position = death_position
-                break
-        selected = {
-            "break_position": break_position,
-            "reclaim_position": reclaim_position,
-            "death_cross_position": death_cross_position,
-        }
+        first_position = position
+        break_position = position - (1 if break_one else 2 if break_two else 3)
         break
 
-    if selected is None:
+    if first_position is None or break_position is None or not valid(latest):
         return None
 
-    reclaim_position = int(selected["reclaim_position"])
-    reclaim = features.iloc[reclaim_position]
-    reclaim_values = (
-        reclaim["open"], reclaim["low"], reclaim["close"], reclaim["white"], reclaim["white_at_open"],
-    )
-    if not all(np.isfinite(float(value)) for value in reclaim_values):
+    age_weeks = latest - first_position
+    if age_weeks < 0 or age_weeks > WEEKLY_RECLAIM_VISIBLE_WEEKS:
         return None
-    reclaim_white = float(reclaim["white"])
-    reclaim_white_at_open = float(reclaim["white_at_open"])
-    reclaim_tolerance = max(abs(reclaim_white) * 0.0005, 0.01)
-    reclaim_open_tolerance = max(abs(reclaim_white_at_open) * 0.0005, 0.01)
-    first_week_open_above = float(reclaim["open"]) >= reclaim_white_at_open - reclaim_open_tolerance
-    first_week_dipped_below = float(reclaim["low"]) < reclaim_white - reclaim_tolerance
-    first_week_closed_above = float(reclaim["close"]) > reclaim_white + reclaim_tolerance
-    first_week_pullback_reclaim = bool(
-        first_week_open_above and first_week_dipped_below and first_week_closed_above
-    )
-    age_weeks = latest - reclaim_position
-    if age_weeks > WEEKLY_RECLAIM_VISIBLE_WEEKS:
+    current = features.iloc[latest]
+    first = features.iloc[first_position]
+    current_open_above = float(current["open"]) > float(current["white_at_open"])
+    current_close_above = stand_above(latest)
+    active_tracking = bool(current_open_above and current_close_above)
+    if not active_tracking:
         return None
-    first_week_open_distance_pct = (float(reclaim["open"]) / reclaim_white_at_open - 1) * 100
-    week_open_distance_pct = (float(last["open"]) / white_at_open - 1) * 100
-    week_close_distance_pct = (float(last["close"]) / last_white - 1) * 100
-    week_dipped_below = float(last["low"]) < last_white - tolerance
-    week_reclaimed = bool(
-        age_weeks == 0 and week_open_above and week_dipped_below and week_close_above
+
+    first_open_above = float(first["open"]) > float(first["white_at_open"])
+    break_price = float(first["white"]) * (1.0 - WEEKLY_BREAK_MARGIN)
+    first_foot = bool(first_open_above and float(first["low"]) < break_price and stand_above(first_position))
+    current_break_price = float(current["white"]) * (1.0 - WEEKLY_BREAK_MARGIN)
+    current_foot = bool(
+        current_open_above and float(current["low"]) < current_break_price and current_close_above
     )
-    weeks_to_reclaim = reclaim_position - int(selected["break_position"])
-    score = 50 + {1: 20, 2: 12, 3: 5}.get(weeks_to_reclaim, 0)
-    if first_week_closed_above:
-        score += WEEKLY_OPEN_CLOSE_BONUS
-    if first_week_pullback_reclaim:
-        score += 20
-    if selected["death_cross_position"] is not None:
-        score += 10
-    second_week_near_white_open = bool(
-        age_weeks == 1
-        and first_week_open_above
-        and week_open_above
-        and week_open_distance_pct <= WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT
+    first_foot_now = bool(age_weeks == 0 and current_foot)
+    second_foot = bool(age_weeks == 1 and current_foot)
+    third_foot = bool(age_weeks == 2 and current_foot)
+    foot_depth_pct = (
+        (float(current["white"]) - float(current["low"])) / float(current["white"]) * 100
+        if current_foot and float(current["white"]) != 0
+        else 0.0
     )
-    if second_week_near_white_open:
-        score += WEEKLY_SECOND_WEEK_NEAR_WHITE_BONUS
+
+    # The requested priority is second week foot > third week foot > the
+    # first week.  It keeps the Pine conditions but gives the user's preferred
+    # "第 2 根／第 3 根剛收回" setup the top ranking.
+    score = 1000
+    if age_weeks == 0:
+        score = 2000
+    if first_foot:
+        score = max(score, 3000)
+    if first_foot_now:
+        score = max(score, 4000)
+    if third_foot:
+        score = max(score, 5000)
+    if second_foot:
+        score = max(score, 6000)
+    if float(current["white"]) > float(current["yellow"]):
+        score += 100
+    if current_foot:
+        score += int(max(0.0, foot_depth_pct) * 10)
+
+    first_open_distance_pct = (float(first["open"]) / float(first["white_at_open"]) - 1) * 100
+    current_open_distance_pct = (float(current["open"]) / float(current["white_at_open"]) - 1) * 100
+    current_close_distance_pct = (float(current["close"]) / float(current["white"]) - 1) * 100
     return {
-        **selected,
-        "weeks_to_reclaim": weeks_to_reclaim,
+        "break_position": break_position,
+        "reclaim_position": first_position,
+        "weeks_to_reclaim": first_position - break_position,
         "age_weeks": age_weeks,
-        "week_open_above_white": week_open_above,
-        "week_close_above_white": week_close_above,
-        "week_white_structure_active": True,
+        "current_week_number": age_weeks + 1,
+        "week_open_above_white": current_open_above,
+        "week_close_above_white": current_close_above,
+        "week_white_structure_active": active_tracking,
         "actual_breakdown_before_reclaim": True,
-        "death_cross_below_ribbon": selected["death_cross_position"] is not None,
-        "week_dipped_below_white": week_dipped_below,
-        "week_reclaimed_white": week_reclaimed,
+        "whole_body_break": True,
+        "week_dipped_below_white": float(current["low"]) < float(current["white"]),
+        "week_reclaimed_white": current_foot,
         "first_week_is_current": age_weeks == 0,
-        "first_week_open_above_white": first_week_open_above,
-        "first_week_dipped_below_white": first_week_dipped_below,
-        "first_week_closed_above_white": first_week_closed_above,
-        "first_week_pullback_reclaim": first_week_pullback_reclaim,
-        "first_week_open_distance_pct": round(first_week_open_distance_pct, 4),
-        "week_open_distance_pct": round(week_open_distance_pct, 4),
-        "week_close_distance_pct": round(week_close_distance_pct, 4),
-        "second_week_near_white_open": second_week_near_white_open,
-        "second_week_near_white_threshold_pct": WEEKLY_SECOND_WEEK_NEAR_WHITE_PCT,
-        "week_open": round(float(last["open"]), 8),
-        "week_low": round(float(last["low"]), 8),
-        "week_close": round(float(last["close"]), 8),
-        "white_line": round(last_white, 8),
-        "white_at_open": round(white_at_open, 8),
+        "first_week_open_above_white": first_open_above,
+        "first_week_dipped_below_white": float(first["low"]) < float(first["white"]),
+        "first_week_closed_above_white": stand_above(first_position),
+        "first_week_pullback_reclaim": first_foot,
+        "first_foot_now": first_foot_now,
+        "second_foot_now": second_foot,
+        "third_foot_now": third_foot,
+        "had_first_foot": first_foot,
+        "foot_depth_pct": round(foot_depth_pct, 4),
+        "first_week_open_distance_pct": round(first_open_distance_pct, 4),
+        "week_open_distance_pct": round(current_open_distance_pct, 4),
+        "week_close_distance_pct": round(current_close_distance_pct, 4),
+        "week_open": round(float(current["open"]), 8),
+        "week_low": round(float(current["low"]), 8),
+        "week_close": round(float(current["close"]), 8),
+        "white_line": round(float(current["white"]), 8),
+        "white_at_open": round(float(current["white_at_open"]), 8),
         "score": score,
     }
 
@@ -1336,10 +1310,9 @@ def _weekly_hourly_state_unavailable() -> dict[str, object]:
     return {
         "hourly_status_available": False,
         "hourly_above_white": False,
-        "hourly_reclaim_count": 0,
-        "hourly_second_reclaim": False,
-        "hourly_second_reclaim_bars_ago": None,
-        "hourly_second_reclaim_within_four_bars": False,
+        "hourly_just_above": False,
+        "hourly_bar_number": 0,
+        "hourly_within_three": False,
         "hourly_last_reclaim_time": None,
         "hourly_bar_time": None,
         "hourly_close": None,
@@ -1391,25 +1364,18 @@ def weekly_white_yellow_status(features: pd.DataFrame | None) -> dict[str, objec
     }
 
 
-def _timestamp_in_session(index_value: object, session: MarketSession) -> pd.Timestamp:
-    timestamp = pd.Timestamp(index_value)
-    if timestamp.tzinfo is None:
-        return timestamp.tz_localize(session.timezone)
-    return timestamp.tz_convert(session.timezone)
-
-
 def hourly_state_since_weekly_reclaim(
     raw: pd.DataFrame,
     session: MarketSession,
     weekly_reclaim_index: object,
     now: datetime,
 ) -> dict[str, object]:
-    """Return the live hourly white-line state after the weekly reclaim.
+    """Return the live one-hour white-line state using Pine's bar count.
 
-    ``刷上去第二次`` is deliberately counted as actual hourly close cross-ups
-    from at/below the white line to above it, starting with the week that
-    produced the weekly reclaim.  Merely remaining above white does not inflate
-    this count.
+    The weekly Pine screener's request.security() counts bars since the latest
+    cross from at/below white to above white.  It does not count the number of
+    historical recovery attempts after the weekly event.  The weekly index is
+    retained only for call-site compatibility.
     """
     unavailable = _weekly_hourly_state_unavailable()
     hourly_timeframe = next(item for item in TIMEFRAMES if item.key == "1h")
@@ -1420,12 +1386,8 @@ def hourly_state_since_weekly_reclaim(
     if features.empty or len(features) < 2:
         return unavailable
 
-    anchor = _timestamp_in_session(weekly_reclaim_index, session)
-    timestamps = [_timestamp_in_session(value, session) for value in features.index]
     reclaim_positions: list[int] = []
     for position in range(1, len(features)):
-        if timestamps[position] < anchor:
-            continue
         row = features.iloc[position]
         previous = features.iloc[position - 1]
         values = (row["close"], row["white_kernel"], previous["close"], previous["white_kernel"])
@@ -1433,10 +1395,9 @@ def hourly_state_since_weekly_reclaim(
             continue
         white = float(row["white_kernel"])
         prior_white = float(previous["white_kernel"])
-        tolerance = max(abs(white) * 0.0005, 0.01)
         crossed_up = (
-            float(previous["close"]) <= prior_white + tolerance
-            and float(row["close"]) > white + tolerance
+            float(previous["close"]) <= prior_white
+            and float(row["close"]) > white
         )
         if crossed_up:
             reclaim_positions.append(position)
@@ -1447,26 +1408,19 @@ def hourly_state_since_weekly_reclaim(
         return unavailable
     hourly_close = float(latest["close"])
     hourly_white = float(latest["white_kernel"])
-    latest_tolerance = max(abs(hourly_white) * 0.0005, 0.01)
-    above_white = hourly_close > hourly_white + latest_tolerance
+    above_white = hourly_close > hourly_white
     last_reclaim_position = reclaim_positions[-1] if reclaim_positions else None
-    second_reclaim_bars_ago = (
-        len(features) - 1 - last_reclaim_position
-        if len(reclaim_positions) >= 2 and last_reclaim_position is not None
-        else None
-    )
-    second_reclaim_within_four_bars = bool(
-        above_white
-        and second_reclaim_bars_ago is not None
-        and second_reclaim_bars_ago <= HOURLY_SECOND_RECLAIM_RECENCY_BARS
+    hourly_bar_number = (
+        len(features) - last_reclaim_position
+        if above_white and last_reclaim_position is not None
+        else 0
     )
     return {
         "hourly_status_available": True,
         "hourly_above_white": above_white,
-        "hourly_reclaim_count": len(reclaim_positions),
-        "hourly_second_reclaim": bool(above_white and len(reclaim_positions) >= 2),
-        "hourly_second_reclaim_bars_ago": second_reclaim_bars_ago,
-        "hourly_second_reclaim_within_four_bars": second_reclaim_within_four_bars,
+        "hourly_just_above": hourly_bar_number == 1,
+        "hourly_bar_number": hourly_bar_number,
+        "hourly_within_three": 1 <= hourly_bar_number <= 3,
         "hourly_last_reclaim_time": (
             format_bar_time(features.index[last_reclaim_position], hourly_timeframe, session)
             if last_reclaim_position is not None
@@ -1677,8 +1631,6 @@ def collect_weekly_reclaims(
         product_category = product_category_for(instrument, public_profile_cache)
         reclaim_position = int(event["reclaim_position"])
         break_position = int(event["break_position"])
-        death_cross_raw = event.get("death_cross_position")
-        death_cross_position = int(death_cross_raw) if death_cross_raw is not None else None
         sparkline, sparkline_signal_index = signal_sparkline(frame, reclaim_position, maximum_bars=26)
         sparkline_start = max(0, len(frame) - 26)
         signal = {
@@ -1696,34 +1648,19 @@ def collect_weekly_reclaims(
                 "last_price": round(float(frame["Close"].iloc[-1]), 8),
                 "week_change_pct": latest_day_change_pct(frame, timeframe, instrument.session),
                 "break_time": format_weekly_bar_time(frame.index[break_position], instrument.session),
-                "death_cross_time": (
-                    format_weekly_bar_time(frame.index[death_cross_position], instrument.session)
-                    if death_cross_position is not None
-                    else None
-                ),
-                "death_cross_weeks_before_break": (
-                    break_position - death_cross_position
-                    if death_cross_position is not None
-                    else None
-                ),
                 "reclaim_time": format_weekly_bar_time(frame.index[reclaim_position], instrument.session),
                 "sparkline": sparkline,
                 "sparkline_signal_index": sparkline_signal_index,
                 "sparkline_break_index": (
                     break_position - sparkline_start if break_position >= sparkline_start else None
                 ),
-                "sparkline_death_index": (
-                    death_cross_position - sparkline_start
-                    if death_cross_position is not None and death_cross_position >= sparkline_start
-                    else None
-                ),
                 **event,
                 **weekly_ai_status,
             }
         signals.append(signal)
-        # Keep the raw weekly bar index only in memory.  It anchors the
-        # hourly "first/second stand back above white" count to this weekly
-        # recovery rather than to an arbitrary trailing number of hours.
+        # The raw weekly bar index remains available to the hourly helper for
+        # backwards-compatible calls.  Pine's 1H counter itself is global and
+        # measures bars since the most recent 1H white-line recovery.
         weekly_candidates.append((signal, instrument, frame.index[reclaim_position]))
 
     hourly_timeframe = next(item for item in TIMEFRAMES if item.key == "1h")
@@ -1750,20 +1687,14 @@ def collect_weekly_reclaims(
             else _weekly_hourly_state_unavailable()
         )
         signal.update(hourly_state)
-        if bool(hourly_state["hourly_above_white"]):
-            signal["score"] = int(signal["score"]) + HOURLY_WHITE_ABOVE_BONUS
-        if bool(
-            signal["first_week_is_current"]
-            and signal["first_week_pullback_reclaim"]
-            and hourly_state["hourly_second_reclaim_within_four_bars"]
-        ):
-            signal["score"] = int(signal["score"]) + HOURLY_SECOND_RECLAIM_BONUS
+        hourly_bar_number = int(hourly_state.get("hourly_bar_number", 0))
+        signal["score"] = int(signal["score"]) + HOURLY_WHITE_RECLAIM_BONUS.get(
+            hourly_bar_number, 0
+        )
         signal["direct_focus"] = bool(
             signal["week_white_structure_active"]
-            and signal["first_week_is_current"]
-            and signal["first_week_pullback_reclaim"]
-            and hourly_state["hourly_above_white"]
-            and hourly_state["hourly_second_reclaim_within_four_bars"]
+            and (signal["second_foot_now"] or signal["third_foot_now"])
+            and hourly_state["hourly_within_three"]
         )
 
     signals.sort(

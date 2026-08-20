@@ -917,17 +917,20 @@ function filteredWeeklyReclaims(frame) {
     .filter((signal) => signal.side === "buy" && signal.signal_type === "weekly_white_reclaim")
     .filter((signal) => selectedMarket === "all" || displayMarket(signal.market) === selectedMarket)
     .filter((signal) => {
-      if (selectedFilter === "first-week") {
-        return Boolean(signal.first_week_is_current && signal.first_week_open_above_white);
+      if (selectedFilter === "second-foot") {
+        return Boolean(signal.second_foot_now);
       }
-      if (selectedFilter === "pullback-reclaim") {
-        return Boolean(signal.first_week_pullback_reclaim);
+      if (selectedFilter === "third-foot") {
+        return Boolean(signal.third_foot_now);
       }
-      if (selectedFilter === "hourly-second-four") {
-        return Boolean(signal.hourly_second_reclaim_within_four_bars);
+      if (selectedFilter === "first-foot") {
+        return Boolean(signal.first_foot_now);
       }
-      if (selectedFilter === "death-cross-below-ribbon") {
-        return Boolean(signal.death_cross_below_ribbon);
+      if (selectedFilter === "hourly-just-above") {
+        return Boolean(signal.hourly_just_above);
+      }
+      if (selectedFilter === "hourly-within-three") {
+        return Boolean(signal.hourly_within_three);
       }
       if (selectedFilter === "golden-cross") {
         return Boolean(signal.weekly_ai_golden_cross);
@@ -941,7 +944,7 @@ function filteredWeeklyReclaims(frame) {
     });
 }
 
-function makeWeeklyReclaimSignal(signal, interval) {
+function makeLegacyWeeklyReclaimSignal(signal, interval) {
   const card = document.createElement("article");
   const directFocus = Boolean(signal.direct_focus);
   card.className = `weekly-reclaim-signal${directFocus ? " is-direct-focus" : ""}`;
@@ -1124,6 +1127,144 @@ function makeWeeklyReclaimSignal(signal, interval) {
   return card;
 }
 
+function makeWeeklyReclaimSignal(signal, interval) {
+  const card = document.createElement("article");
+  const directFocus = Boolean(signal.direct_focus);
+  card.className = `weekly-reclaim-signal${directFocus ? " is-direct-focus" : ""}`;
+
+  const top = document.createElement("div");
+  top.className = "alert-top";
+  const heading = document.createElement("div");
+  const ticker = document.createElement("h4");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const status = document.createElement("p");
+  status.className = "weekly-reclaim-status";
+  status.textContent = `做多｜第 ${Number(signal.current_week_number || 0)} 根週K白線追蹤`;
+  heading.append(ticker, status);
+
+  const quote = document.createElement("div");
+  quote.className = "signal-quote";
+  const price = document.createElement("strong");
+  price.className = "signal-price";
+  price.textContent = formatSignalPrice(signal);
+  quote.append(price);
+  const weekChange = makeTodayChange(signal.week_change_pct, "本週漲跌");
+  if (weekChange) quote.append(weekChange);
+  if (directFocus) {
+    const focusLight = document.createElement("span");
+    focusLight.className = "direct-focus-light";
+    focusLight.innerHTML = '<i aria-hidden="true"></i>直接關注';
+    quote.append(focusLight);
+  }
+  top.append(heading, quote);
+
+  const details = document.createElement("div");
+  details.className = "signal-details weekly-reclaim-details";
+  const industry = document.createElement("span");
+  industry.textContent = industryText(signal);
+  const recovery = document.createElement("span");
+  recovery.textContent = `整根實體跌破後第 ${Number(signal.weeks_to_reclaim || 0)} 根收盤站回`;
+  const score = document.createElement("span");
+  score.className = "weekly-score";
+  score.textContent = `結構分數 ${Number(signal.score || 0)}`;
+  details.append(industry, recovery, score);
+
+  const timeline = document.createElement("p");
+  timeline.className = "weekly-reclaim-timeline";
+  timeline.textContent = `有效實體跌破白線：${signal.break_time || "資料不足"}　→　首根收盤站回：${signal.reclaim_time || "資料不足"}`;
+
+  const stateList = document.createElement("div");
+  stateList.className = "weekly-reclaim-states";
+  const baseState = document.createElement("span");
+  baseState.textContent = `主規則成立｜第 ${Number(signal.current_week_number || 0)} 根週K，開盤與收盤都在 AI 白線上`;
+  stateList.append(baseState);
+
+  const footLabel = signal.second_foot_now
+    ? "最高優先｜第 2 根週K盤中跌破白線 0.1% 後剛收回"
+    : signal.third_foot_now
+      ? "次高優先｜第 3 根週K盤中跌破白線 0.1% 後剛收回"
+      : signal.first_foot_now
+        ? "第 1 根週K盤中跌破白線 0.1% 後剛收回"
+        : null;
+  if (footLabel) {
+    const foot = document.createElement("span");
+    foot.className = signal.second_foot_now ? "direct-focus-state" : "strong-bonus";
+    foot.textContent = `${footLabel}（下探 ${Number(signal.foot_depth_pct || 0).toFixed(2)}%）`;
+    stateList.append(foot);
+  } else if (signal.had_first_foot) {
+    const priorFoot = document.createElement("span");
+    priorFoot.className = "bonus";
+    priorFoot.textContent = "首根週K曾盤中跌破白線後收回";
+    stateList.append(priorFoot);
+  }
+
+  const weeklyAiStatus = document.createElement("p");
+  weeklyAiStatus.className = "weekly-white-status weekly-ai-status";
+  if (signal.weekly_ai_white_yellow_available) {
+    const crossAge = Number(signal.weekly_ai_golden_cross_weeks_ago);
+    const crossAgeText = crossAge === 0 ? "本週完成" : `${crossAge} 週前完成`;
+    if (signal.weekly_ai_golden_cross) {
+      weeklyAiStatus.textContent = `週K AI 白線金叉黃線：${crossAgeText}`;
+      const golden = document.createElement("span");
+      golden.className = "strong-bonus";
+      golden.textContent = `週K白金叉黃線：${crossAgeText}`;
+      stateList.append(golden);
+    } else if (signal.weekly_ai_white_above_yellow) {
+      weeklyAiStatus.textContent = "週K白線位於黃線上方（+100）；最近 4 週未出現金叉";
+    } else {
+      weeklyAiStatus.textContent = "週K白線仍在黃線下方；不給白黃趨勢加分";
+    }
+  } else {
+    weeklyAiStatus.textContent = "週K白線／黃線資料不足";
+  }
+
+  const hourlyNumber = Number(signal.hourly_bar_number || 0);
+  const hourlyDistance = Number(signal.hourly_white_distance_pct);
+  const signedPercent = (value) => Number.isFinite(value) ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "資料不足";
+  const whiteStatus = document.createElement("p");
+  whiteStatus.className = "weekly-white-status";
+  const hourlyText = signal.hourly_status_available
+    ? hourlyNumber > 0
+      ? `1H已站上白線第 ${hourlyNumber} 根（${signedPercent(hourlyDistance)}）`
+      : `1H尚未站上白線（${signedPercent(hourlyDistance)}）`
+    : "1H資料暫缺";
+  whiteStatus.textContent = `白線狀況｜首根開盤 ${signedPercent(signal.first_week_open_distance_pct)}；本週開盤 ${signedPercent(signal.week_open_distance_pct)}、收盤 ${signedPercent(signal.week_close_distance_pct)}｜${hourlyText}`;
+  if (signal.hourly_status_available) {
+    const hourly = document.createElement("span");
+    hourly.className = signal.hourly_within_three ? "bonus" : "hourly-pending";
+    hourly.textContent = hourlyNumber === 1
+      ? "1H 剛站回白線第 1 根 ＋80"
+      : hourlyNumber === 2
+        ? "1H 站回白線第 2 根 ＋55"
+        : hourlyNumber === 3
+          ? "1H 站回白線第 3 根 ＋35"
+          : hourlyNumber > 3
+            ? `1H 站上白線已第 ${hourlyNumber} 根，不加即時分`
+            : "1H 尚未站上白線";
+    stateList.append(hourly);
+  }
+
+  const values = (Array.isArray(signal.sparkline) ? signal.sparkline : []).map(Number).filter(Number.isFinite);
+  const direction = values.length >= 2 && values.at(-1) < values[0] ? "down" : "up";
+  const sparkline = makeSparkline(signal.sparkline, direction, true, {
+    title: "週線近 26 週走勢；藍點為首根收盤站回 AI 白線",
+    markers: [{ index: signal.sparkline_signal_index, kind: "signal", label: "站回" }],
+  });
+  if (sparkline) sparkline.classList.add("signal-sparkline");
+
+  const valuesText = document.createElement("p");
+  valuesText.className = "weekly-reclaim-values";
+  const hourlyValues = signal.hourly_status_available
+    ? ` ｜ 1H C ${plainQuote(signal.hourly_close)} / 白線 ${plainQuote(signal.hourly_white_line)}`
+    : "";
+  valuesText.textContent = `本週 O ${plainQuote(signal.week_open)} ／ L ${plainQuote(signal.week_low)} ／ C ${plainQuote(signal.week_close)} ｜ AI 白線（開盤基準）${plainQuote(signal.white_at_open)} ／ 目前 ${plainQuote(signal.white_line)} ／ 黃線 ${plainQuote(signal.weekly_ai_yellow)}${hourlyValues}`;
+
+  card.append(top, details, timeline, stateList, whiteStatus, weeklyAiStatus);
+  if (sparkline) card.append(sparkline);
+  card.append(valuesText, makeTradingViewLink(signal, interval));
+  return card;
+}
+
 function renderWeeklyReclaims(payload) {
   if (!elements.weeklyReclaimSignals) return;
   const frame = payload?.weekly_reclaim || {};
@@ -1131,7 +1272,7 @@ function renderWeeklyReclaims(payload) {
   if (signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "timeframe-empty";
-    empty.textContent = `目前篩選市場中，沒有近 ${Number(frame.lookback_weeks || 3)} 週實體跌破白線後、首週開盤站回白線的結構。`;
+    empty.textContent = `目前篩選市場中，沒有近 ${Number(frame.lookback_weeks || 3)} 週整根實體跌破白線後、收盤站回且仍在第 1～3 根追蹤內的結構。`;
     elements.weeklyReclaimSignals.replaceChildren(empty);
   } else {
     elements.weeklyReclaimSignals.replaceChildren(
