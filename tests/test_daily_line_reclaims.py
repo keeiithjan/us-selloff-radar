@@ -78,6 +78,44 @@ class DailyLineReclaimTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["opening_reclaim_lines"], ["白線"])
 
+    def test_first_reclaim_can_happen_later_and_open_below_line(self) -> None:
+        frame = base_frame()
+        # Three sessions ago: black real body breaks the white line.
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.0
+        # The following session stays below and does not reclaim.
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.3
+        frame.iloc[-2, frame.columns.get_loc("High")] = 99.6
+        frame.iloc[-2, frame.columns.get_loc("Low")] = 98.8
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 99.1
+        # Current session opens below, then its red real body crosses back up.
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 99.4
+        frame.iloc[-1, frame.columns.get_loc("High")] = 101.0
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 99.2
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.8
+
+        event = daily_line_reclaim_event(frame)
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["opening_reclaim_lines"], [])
+        self.assertEqual(event["first_reclaim_lines"], ["白線"])
+        self.assertEqual(event["first_reclaim_break_bars_ago"], {"白線": 2})
+
+    def test_first_reclaim_is_not_repeated_on_later_bars(self) -> None:
+        frame = base_frame()
+        frame.iloc[-4, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-4, frame.columns.get_loc("Close")] = 99.0
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 99.3
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.1
+        # This bar is the first reclaim and clears the pending breakdown.
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.4
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 100.8
+        # Still above today, but it must not be labelled again.
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 100.7
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.9
+
+        self.assertIsNone(daily_line_reclaim_event(frame))
+
 
 if __name__ == "__main__":
     unittest.main()

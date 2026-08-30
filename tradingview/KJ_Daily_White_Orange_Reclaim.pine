@@ -33,11 +33,23 @@ orangeBodyFullyAbove = math.min(open, close) > orangeLine
 whiteRedBodyCross = isRedK and open <= whiteLine and close > whiteLine
 orangeRedBodyCross = isRedK and open <= orangeLine and close > orangeLine
 
-// "First reclaim bar" is specifically the daily bar immediately after the
-// confirmed real-body breakdown.
-whiteFirstReclaim = timeframe.isdaily and whiteBodyBreak[1] and (whiteBodyFullyAbove or whiteRedBodyCross)
-orangeFirstReclaim = timeframe.isdaily and orangeBodyBreak[1] and (orangeBodyFullyAbove or orangeRedBodyCross)
+// A breakdown remains pending until the first later valid body reclaim.  This
+// signal is independent of that reclaim day's opening position.
+var bool whiteBreakPending = false
+var bool orangeBreakPending = false
+whiteFirstReclaim = timeframe.isdaily and whiteBreakPending and (whiteBodyFullyAbove or whiteRedBodyCross)
+orangeFirstReclaim = timeframe.isdaily and orangeBreakPending and (orangeBodyFullyAbove or orangeRedBodyCross)
 eitherFirstReclaim = whiteFirstReclaim or orangeFirstReclaim
+
+if whiteBodyBreak
+    whiteBreakPending := true
+else if whiteFirstReclaim and barstate.isconfirmed
+    whiteBreakPending := false
+
+if orangeBodyBreak
+    orangeBreakPending := true
+else if orangeFirstReclaim and barstate.isconfirmed
+    orangeBreakPending := false
 
 // Put the watchlist notification output first for Pine Screener.
 plot(nextOpenAboveEither ? 1 : 0, "隔日開盤站回白線或橙線", color = color.new(color.lime, 100), display = display.data_window)
@@ -62,6 +74,6 @@ if enableImmediateAlert and nextOpenAboveEither and barstate.isnew
     alert(syminfo.ticker + "：昨日黑K實體跌破，今日開盤已重新站上" + reclaimed, alert.freq_once_per_bar)
 
 alertcondition(nextOpenAboveEither, "隔日開盤站回白線或橙線", "{{ticker}} 昨日黑K實體跌破白線或橙線，今日開盤已重新站上被跌破的同一條線")
-alertcondition(eitherFirstReclaim, "白線或橙線站回第一根", "{{ticker}} 昨日黑K實體跌破白線或橙線，今日出現第一根有效站回K")
+alertcondition(eitherFirstReclaim, "白線或橙線站回第一根", "{{ticker}} 先前黑K實體跌破白線或橙線，今日出現該次跌破後第一根有效站回K")
 alertcondition(whiteBodyBreak, "實體跌破白線", "{{ticker}} 黑K實體跌破白線")
 alertcondition(orangeBodyBreak, "實體跌破橙線", "{{ticker}} 黑K實體跌破橙線")

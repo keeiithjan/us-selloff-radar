@@ -890,10 +890,11 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     """Return the current daily white/orange breakdown-reclaim event.
 
-    The previous completed candle must be black and its real body must cross
-    from at/above the selected AI Momentum line to below it.  The newest daily
-    candle is intentionally allowed to be live so an opening reclaim can be
-    surfaced as soon as the first quote is available.
+    Opening reclaim is a strict next-session event: the previous completed
+    candle must be black and its real body must cross below the selected line.
+    First-body reclaim is independent of the open: a breakdown stays pending
+    until the first later candle whose body validly reclaims that same line.
+    The newest daily candle may be live so either event can surface promptly.
     """
     required = {"Open", "High", "Low", "Close"}
     if not required.issubset(frame.columns):
@@ -934,38 +935,88 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     current_white = float(current["white_kernel"])
     current_orange = float(current["orange_upper"])
 
-    previous_is_black = previous_close < previous_open
-    broke_white = previous_is_black and previous_open >= previous_white and previous_close < previous_white
-    broke_orange = previous_is_black and previous_open >= previous_orange and previous_close < previous_orange
-    if not (broke_white or broke_orange):
+    def body_breaks(open_value: float, close_value: float, target: float) -> bool:
+        return close_value < open_value and open_value >= target and close_value < target
+
+    def body_reclaims(open_value: float, close_value: float, target: float) -> bool:
+        body_fully_above = min(open_value, close_value) > target
+        red_body_cross = close_value > open_value and open_value <= target and close_value > target
+        return body_fully_above or red_body_cross
+
+    # The opening notification only uses yesterday's confirmed breakdown.
+    broke_white = body_breaks(previous_open, previous_close, previous_white)
+    broke_orange = body_breaks(previous_open, previous_close, previous_orange)
+
+    # Track each breakdown until its first later valid body reclaim.  A reclaim
+    # on an earlier bar clears the pending state, so a continuously-above body
+    # is not repeatedly labelled on subsequent days.
+    def pending_break_reclaimed_now(line_column: str) -> int | None:
+        pending_position: int | None = None
+        last_position = len(clean) - 1
+        for position in range(len(clean)):
+            line_value = features[line_column].iloc[position]
+            open_value = clean["Open"].iloc[position]
+            close_value = clean["Close"].iloc[position]
+            if not all(np.isfinite(float(value)) for value in (line_value, open_value, close_value)):
+                continue
+            line_float = float(line_value)
+            open_float = float(open_value)
+            close_float = float(close_value)
+            if (
+                pending_position is not None
+                and position > pending_position
+                and body_reclaims(open_float, close_float, line_float)
+            ):
+                reclaimed_break = pending_position
+                pending_position = None
+                if position == last_position:
+                    return reclaimed_break
+            if body_breaks(open_float, close_float, line_float):
+                pending_position = position
         return None
 
-    def reclaims(target: float) -> bool:
-        body_fully_above = min(current_open, current_close) > target
-        red_body_cross = current_close > current_open and current_open <= target and current_close > target
-        return body_fully_above or red_body_cross
+    white_first_break_position = pending_break_reclaimed_now("white_kernel")
+    orange_first_break_position = pending_break_reclaimed_now("orange_upper")
 
     opening_lines: list[str] = []
     first_reclaim_lines: list[str] = []
     if broke_white:
         if current_open > previous_white:
             opening_lines.append("白線")
-        if reclaims(current_white):
-            first_reclaim_lines.append("白線")
     if broke_orange:
         if current_open > previous_orange:
             opening_lines.append("橙線")
-        if reclaims(current_orange):
-            first_reclaim_lines.append("橙線")
+    if white_first_break_position is not None:
+        first_reclaim_lines.append("白線")
+    if orange_first_break_position is not None:
+        first_reclaim_lines.append("橙線")
     if not opening_lines and not first_reclaim_lines:
         return None
+
+    broken_lines = [
+        line
+        for line, active in (
+            ("白線", broke_white or white_first_break_position is not None),
+            ("橙線", broke_orange or orange_first_break_position is not None),
+        )
+        if active
+    ]
+    first_reclaim_break_bars_ago = {
+        line: len(clean) - 1 - position
+        for line, position in (
+            ("白線", white_first_break_position),
+            ("橙線", orange_first_break_position),
+        )
+        if position is not None
+    }
 
     prior_close = float(clean["Close"].iloc[-2])
     change_pct = ((current_close / prior_close) - 1) * 100 if prior_close else 0.0
     return {
         "opening_reclaim_lines": opening_lines,
         "first_reclaim_lines": first_reclaim_lines,
-        "broken_lines": [line for line, active in (("白線", broke_white), ("橙線", broke_orange)) if active],
+        "broken_lines": broken_lines,
+        "first_reclaim_break_bars_ago": first_reclaim_break_bars_ago,
         "open_price": round(current_open, 8),
         "last_price": round(current_close, 8),
         "change_pct": round(change_pct, 4),
@@ -1649,28 +1700,29 @@ def collect_signals(
             live_event = daily_line_reclaim_event(raw)
             if live_event is not None:
                 event_index = live_event.pop("bar_index_value")
-                if is_current_daily_bar(event_index, instrument.session, now):
-                    product_category = product_category_for(instrument, public_profile_cache)
-                    tradingview_symbol = tradingview_symbol_for(instrument)
-                    bar_date = pd.Timestamp(event_index)
-                    if bar_date.tzinfo is not None:
-                        bar_date = bar_date.tz_convert(instrument.session.timezone)
-                    daily_line_reclaim_signals.append(
-                        {
-                            "signal_id": f"{tradingview_symbol}:{bar_date.date().isoformat()}",
-                            "symbol": instrument.symbol,
-                            "name": instrument.name,
-                            "industry": instrument.industry,
-                            "product_category": product_category,
-                            "exchange": instrument.exchange,
-                            "tradingview_symbol": tradingview_symbol,
-                            "market": instrument.market,
-                            "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
-                            "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
-                            "is_live_session": session_is_live(instrument.session, now),
-                            **live_event,
-                        }
-                    )
+                current_daily_bar = is_current_daily_bar(event_index, instrument.session, now)
+                product_category = product_category_for(instrument, public_profile_cache)
+                tradingview_symbol = tradingview_symbol_for(instrument)
+                bar_date = pd.Timestamp(event_index)
+                if bar_date.tzinfo is not None:
+                    bar_date = bar_date.tz_convert(instrument.session.timezone)
+                daily_line_reclaim_signals.append(
+                    {
+                        "signal_id": f"{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol,
+                        "market": instrument.market,
+                        "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                        "is_current_daily_bar": current_daily_bar,
+                        "is_live_session": current_daily_bar and session_is_live(instrument.session, now),
+                        **live_event,
+                    }
+                )
         frame = confirmed_bars(raw, timeframe, instrument.session, now)
         if len(frame) < 13:
             continue

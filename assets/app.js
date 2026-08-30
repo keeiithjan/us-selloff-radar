@@ -339,7 +339,7 @@ function makeLineReclaimCard(signal, mode) {
   const broken = lineNames(signal, "broken_lines").join("＋") || "目標線";
   rule.textContent = mode === "opening"
     ? `前一日黑K實體跌破${broken}；今日開盤重新站上同一條線。`
-    : `前一日黑K實體跌破${broken}；今日為跌破後第一根有效站回K。`;
+    : `先前黑K實體跌破${broken}；今日為該次跌破後第一根有效站回K，與開盤位置無關。`;
 
   const values = document.createElement("p");
   values.className = "line-reclaim-values";
@@ -417,6 +417,9 @@ function notifyOpeningReclaims(signals) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   const notified = notifiedLineAlertKeys();
   for (const signal of signals) {
+    // Keep latest-session cards visible after the close, but never replay an
+    // old opening event as a fresh browser notification.
+    if (!signal.is_current_daily_bar) continue;
     const lines = lineNames(signal, "opening_reclaim_lines").sort().join("+");
     const key = `${signal.signal_id || signal.tradingview_symbol}:${lines}`;
     if (!lines || notified.has(key)) continue;
