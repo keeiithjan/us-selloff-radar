@@ -15,10 +15,55 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260821-system-status3">
+    <link rel="stylesheet" href="assets/styles.css?v=20260831-line-reclaim1">
   </head>
   <body>
     <main class="shell">
+      <section class="line-reclaim-command" aria-labelledby="line-reclaim-title">
+        <div class="line-reclaim-command-head">
+          <div>
+            <p class="eyebrow">DAILY OPEN RECLAIM · PRIORITY FEED</p>
+            <h1 id="line-reclaim-title">白線／橙線開盤站回雷達</h1>
+            <p class="line-reclaim-lede">前一交易日必須先出現黑 K 實體跌破；隔日開盤重新站上被跌破的同一條線，立即列入。右側同步顯示跌破後第一根有效站回 K。</p>
+          </div>
+          <div class="line-reclaim-command-actions">
+            <span class="line-reclaim-live"><i aria-hidden="true"></i> 60S AUTO REFRESH</span>
+            <button id="enable-line-alerts" class="enable-line-alerts" type="button">開啟網站通知</button>
+          </div>
+        </div>
+        <div class="line-reclaim-summary" aria-live="polite">
+          <p id="line-reclaim-updated">正在讀取日線訊號…</p>
+          <p id="line-reclaim-scan-count">等待掃描資料</p>
+          <p id="line-reclaim-notice">網站通知需保持此頁或已安裝的 PWA 開啟；TradingView 清單警報仍是開盤即時通知主通道。</p>
+        </div>
+        <div class="line-reclaim-columns">
+          <section class="line-reclaim-panel opening" aria-labelledby="opening-reclaim-title">
+            <div class="line-reclaim-panel-head">
+              <div>
+                <p class="eyebrow">OPENING RECLAIM</p>
+                <h2 id="opening-reclaim-title">隔日開盤立即站回</h2>
+              </div>
+              <strong id="opening-reclaim-count" class="line-reclaim-count">0</strong>
+            </div>
+            <div id="opening-reclaim-signals" class="line-reclaim-signals" aria-live="polite">
+              <p class="line-reclaim-empty">正在同步最新開盤訊號…</p>
+            </div>
+          </section>
+          <section class="line-reclaim-panel first" aria-labelledby="first-reclaim-title">
+            <div class="line-reclaim-panel-head">
+              <div>
+                <p class="eyebrow">FIRST RECLAIM BAR</p>
+                <h2 id="first-reclaim-title">站回第一根標的</h2>
+              </div>
+              <strong id="first-reclaim-count" class="line-reclaim-count">0</strong>
+            </div>
+            <div id="first-reclaim-signals" class="line-reclaim-signals" aria-live="polite">
+              <p class="line-reclaim-empty">正在同步第一根站回訊號…</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <header class="hero">
         <div class="hero-copy">
           <p class="eyebrow">KJ // MARKET INTELLIGENCE</p>
@@ -174,6 +219,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260821-system-status3"></script>
+    <script src="assets/app.js?v=20260831-line-reclaim1"></script>
   </body>
 </html>

@@ -822,6 +822,7 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "close",
         "white_kernel",
+        "orange_upper",
         "yellow_mid",
         "trend_lower_edge",
         "trend_upper_edge",
@@ -875,6 +876,7 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
             "open": open_price,
             "close": close,
             "white_kernel": kernel_close,
+            "orange_upper": upper_inside,
             "yellow_mid": yellow_mid,
             "trend_lower_edge": trend_lower_edge,
             "trend_upper_edge": trend_upper_edge,
@@ -882,6 +884,119 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
             "very_bearish": very_bearish.fillna(False),
         },
         index=frame.index,
+    )
+
+
+def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
+    """Return the current daily white/orange breakdown-reclaim event.
+
+    The previous completed candle must be black and its real body must cross
+    from at/above the selected AI Momentum line to below it.  The newest daily
+    candle is intentionally allowed to be live so an opening reclaim can be
+    surfaced as soon as the first quote is available.
+    """
+    required = {"Open", "High", "Low", "Close"}
+    if not required.issubset(frame.columns):
+        return None
+    columns = ["Open", "High", "Low", "Close"]
+    if "Volume" in frame.columns:
+        columns.append("Volume")
+    clean = frame[columns].dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
+    # Some cash indices and FX feeds omit daily volume.  The white/orange
+    # kernels do not depend on volume, so keep them eligible with a neutral
+    # placeholder for the unrelated VWMA features calculated alongside them.
+    if "Volume" not in clean.columns:
+        clean["Volume"] = 1.0
+    minimum_bars = ZONE_INSIDE_LENGTH + KERNEL_LOOKBACK + KERNEL_START_BAR + 2
+    if len(clean) < minimum_bars:
+        return None
+
+    features = ai_momentum_features(clean)
+    if len(features) < 2:
+        return None
+    previous = features.iloc[-2]
+    current = features.iloc[-1]
+    values = (
+        previous["white_kernel"], previous["orange_upper"],
+        current["white_kernel"], current["orange_upper"],
+        clean["Open"].iloc[-2], clean["Close"].iloc[-2],
+        clean["Open"].iloc[-1], clean["Close"].iloc[-1],
+    )
+    if not all(np.isfinite(float(value)) for value in values):
+        return None
+
+    previous_open = float(clean["Open"].iloc[-2])
+    previous_close = float(clean["Close"].iloc[-2])
+    current_open = float(clean["Open"].iloc[-1])
+    current_close = float(clean["Close"].iloc[-1])
+    previous_white = float(previous["white_kernel"])
+    previous_orange = float(previous["orange_upper"])
+    current_white = float(current["white_kernel"])
+    current_orange = float(current["orange_upper"])
+
+    previous_is_black = previous_close < previous_open
+    broke_white = previous_is_black and previous_open >= previous_white and previous_close < previous_white
+    broke_orange = previous_is_black and previous_open >= previous_orange and previous_close < previous_orange
+    if not (broke_white or broke_orange):
+        return None
+
+    def reclaims(target: float) -> bool:
+        body_fully_above = min(current_open, current_close) > target
+        red_body_cross = current_close > current_open and current_open <= target and current_close > target
+        return body_fully_above or red_body_cross
+
+    opening_lines: list[str] = []
+    first_reclaim_lines: list[str] = []
+    if broke_white:
+        if current_open > previous_white:
+            opening_lines.append("白線")
+        if reclaims(current_white):
+            first_reclaim_lines.append("白線")
+    if broke_orange:
+        if current_open > previous_orange:
+            opening_lines.append("橙線")
+        if reclaims(current_orange):
+            first_reclaim_lines.append("橙線")
+    if not opening_lines and not first_reclaim_lines:
+        return None
+
+    prior_close = float(clean["Close"].iloc[-2])
+    change_pct = ((current_close / prior_close) - 1) * 100 if prior_close else 0.0
+    return {
+        "opening_reclaim_lines": opening_lines,
+        "first_reclaim_lines": first_reclaim_lines,
+        "broken_lines": [line for line, active in (("白線", broke_white), ("橙線", broke_orange)) if active],
+        "open_price": round(current_open, 8),
+        "last_price": round(current_close, 8),
+        "change_pct": round(change_pct, 4),
+        "previous_open": round(previous_open, 8),
+        "previous_close": round(previous_close, 8),
+        "previous_white": round(previous_white, 8),
+        "previous_orange": round(previous_orange, 8),
+        "current_white": round(current_white, 8),
+        "current_orange": round(current_orange, 8),
+        "bar_index_value": clean.index[-1],
+    }
+
+
+def is_current_daily_bar(index_value: object, session: MarketSession, now: datetime) -> bool:
+    """Whether a daily row belongs to the instrument's current local date."""
+    timestamp = pd.Timestamp(index_value)
+    if timestamp.tzinfo is None:
+        bar_date = timestamp.date()
+    else:
+        bar_date = timestamp.tz_convert(session.timezone).date()
+    return bar_date == now.astimezone(session.timezone).date()
+
+
+def session_is_live(session: MarketSession, now: datetime) -> bool:
+    """Return a UI hint; signal eligibility itself does not depend on this."""
+    local_now = now.astimezone(session.timezone)
+    if session.session_open is None or session.session_close is None:
+        return True
+    return (
+        local_now.weekday() < 5
+        and session.session_open <= local_now.time() < session.session_close
     )
 
 
@@ -1520,11 +1635,42 @@ def collect_signals(
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
     trend_reclaim_signals: list[dict[str, object]] = []
+    daily_line_reclaim_signals: list[dict[str, object]] = []
+    daily_line_scanned_by_market: dict[str, int] = {}
     taiwan_universe: dict[str, dict[str, str]] = {}
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
     for instrument, raw in records:
+        if timeframe.key == "1d" and not raw.empty:
+            daily_line_scanned_by_market[instrument.market] = (
+                daily_line_scanned_by_market.get(instrument.market, 0) + 1
+            )
+            live_event = daily_line_reclaim_event(raw)
+            if live_event is not None:
+                event_index = live_event.pop("bar_index_value")
+                if is_current_daily_bar(event_index, instrument.session, now):
+                    product_category = product_category_for(instrument, public_profile_cache)
+                    tradingview_symbol = tradingview_symbol_for(instrument)
+                    bar_date = pd.Timestamp(event_index)
+                    if bar_date.tzinfo is not None:
+                        bar_date = bar_date.tz_convert(instrument.session.timezone)
+                    daily_line_reclaim_signals.append(
+                        {
+                            "signal_id": f"{tradingview_symbol}:{bar_date.date().isoformat()}",
+                            "symbol": instrument.symbol,
+                            "name": instrument.name,
+                            "industry": instrument.industry,
+                            "product_category": product_category,
+                            "exchange": instrument.exchange,
+                            "tradingview_symbol": tradingview_symbol,
+                            "market": instrument.market,
+                            "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
+                            "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                            "is_live_session": session_is_live(instrument.session, now),
+                            **live_event,
+                        }
+                    )
         frame = confirmed_bars(raw, timeframe, instrument.session, now)
         if len(frame) < 13:
             continue
@@ -1642,6 +1788,13 @@ def collect_signals(
 
     signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
     trend_reclaim_signals.sort(key=lambda item: str(item["occurred_at_utc"]), reverse=True)
+    daily_line_reclaim_signals.sort(
+        key=lambda item: (
+            not bool(item.get("opening_reclaim_lines")),
+            str(item.get("market") or ""),
+            str(item.get("tradingview_symbol") or ""),
+        )
+    )
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -1652,6 +1805,11 @@ def collect_signals(
         "last_completed_bar_et": "已依各市場最後完成 K 棒計算" if latest_completed else None,
         "signals": signals,
         "trend_reclaim_signals": trend_reclaim_signals,
+        "daily_line_reclaims": {
+            "scanned_symbols": sum(daily_line_scanned_by_market.values()),
+            "scanned_by_market": daily_line_scanned_by_market,
+            "signals": daily_line_reclaim_signals,
+        },
         "taiwan_pine_screener_universe": sorted(
             taiwan_universe.values(),
             key=lambda item: (

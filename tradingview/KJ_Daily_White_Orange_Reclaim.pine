@@ -1,0 +1,67 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0.
+// Original AI Momentum line calculations: © YinYangAlgorithms
+
+//@version=5
+indicator("KJ 日線白線／橙線跌破隔日站回", overlay = true)
+
+import jdehorty/KernelFunctions/2 as kernels
+
+lookbackWindow = input.int(8, "Lookback Window", minval = 3, maxval = 50, group = "線條設定")
+relativeWeighting = input.float(8.0, "Relative Weighting", minval = 0.25, maxval = 25, step = 0.25, group = "線條設定")
+startBar = input.int(25, "Start Regression at Bar", minval = 1, group = "線條設定")
+zoneLength = input.int(50, "橙線 Highest High Length", minval = 1, group = "線條設定")
+showLines = input.bool(true, "顯示白線與橙線", group = "圖表顯示")
+enableImmediateAlert = input.bool(true, "啟用開盤立即通知", group = "通知")
+
+whiteLine = kernels.rationalQuadratic(close, lookbackWindow, relativeWeighting, startBar)
+orangeLine = kernels.rationalQuadratic(ta.highest(high, zoneLength), lookbackWindow, relativeWeighting, startBar)
+
+isBlackK = close < open
+isRedK = close > open
+
+// The prior candle must be a confirmed black real-body cross down.
+whiteBodyBreak = isBlackK and open >= whiteLine and close < whiteLine and barstate.isconfirmed
+orangeBodyBreak = isBlackK and open >= orangeLine and close < orangeLine and barstate.isconfirmed
+
+// Compare today's fixed open with the prior day's confirmed line value.
+nextOpenAboveWhite = timeframe.isdaily and whiteBodyBreak[1] and open > whiteLine[1]
+nextOpenAboveOrange = timeframe.isdaily and orangeBodyBreak[1] and open > orangeLine[1]
+nextOpenAboveEither = nextOpenAboveWhite or nextOpenAboveOrange
+
+whiteBodyFullyAbove = math.min(open, close) > whiteLine
+orangeBodyFullyAbove = math.min(open, close) > orangeLine
+whiteRedBodyCross = isRedK and open <= whiteLine and close > whiteLine
+orangeRedBodyCross = isRedK and open <= orangeLine and close > orangeLine
+
+// "First reclaim bar" is specifically the daily bar immediately after the
+// confirmed real-body breakdown.
+whiteFirstReclaim = timeframe.isdaily and whiteBodyBreak[1] and (whiteBodyFullyAbove or whiteRedBodyCross)
+orangeFirstReclaim = timeframe.isdaily and orangeBodyBreak[1] and (orangeBodyFullyAbove or orangeRedBodyCross)
+eitherFirstReclaim = whiteFirstReclaim or orangeFirstReclaim
+
+// Put the watchlist notification output first for Pine Screener.
+plot(nextOpenAboveEither ? 1 : 0, "隔日開盤站回白線或橙線", color = color.new(color.lime, 100), display = display.data_window)
+plot(whiteBodyBreak ? 1 : 0, "實體跌破白線", color = color.new(color.white, 100), display = display.data_window)
+plot(orangeBodyBreak ? 1 : 0, "實體跌破橙線", color = color.new(color.orange, 100), display = display.data_window)
+plot(whiteFirstReclaim ? 1 : 0, "白線站回第一根", color = color.new(color.red, 100), display = display.data_window)
+plot(orangeFirstReclaim ? 1 : 0, "橙線站回第一根", color = color.new(color.orange, 100), display = display.data_window)
+plot(eitherFirstReclaim ? 1 : 0, "白線或橙線站回第一根", color = color.new(color.purple, 100), display = display.data_window)
+plot(nextOpenAboveWhite ? 1 : 0, "隔日開盤在白線上", color = color.new(color.lime, 100), display = display.data_window)
+plot(nextOpenAboveOrange ? 1 : 0, "隔日開盤在橙線上", color = color.new(color.aqua, 100), display = display.data_window)
+
+plot(showLines ? whiteLine : na, "白線", color = color.white, linewidth = 2)
+plot(showLines ? orangeLine : na, "橙線", color = color.orange, linewidth = 2)
+
+plotshape(whiteBodyBreak, title = "破白", style = shape.labeldown, location = location.abovebar, color = color.black, textcolor = color.white, text = "破白", size = size.tiny)
+plotshape(orangeBodyBreak, title = "破橙", style = shape.labeldown, location = location.abovebar, color = color.orange, textcolor = color.black, text = "破橙", size = size.tiny)
+plotshape(whiteFirstReclaim, title = "回白", style = shape.labelup, location = location.belowbar, color = color.red, textcolor = color.white, text = "回白", size = size.tiny)
+plotshape(orangeFirstReclaim, title = "回橙", style = shape.labelup, location = location.belowbar, color = color.orange, textcolor = color.black, text = "回橙", size = size.tiny)
+
+if enableImmediateAlert and nextOpenAboveEither and barstate.isnew
+    string reclaimed = nextOpenAboveWhite and nextOpenAboveOrange ? "白線及橙線" : nextOpenAboveWhite ? "白線" : "橙線"
+    alert(syminfo.ticker + "：昨日黑K實體跌破，今日開盤已重新站上" + reclaimed, alert.freq_once_per_bar)
+
+alertcondition(nextOpenAboveEither, "隔日開盤站回白線或橙線", "{{ticker}} 昨日黑K實體跌破白線或橙線，今日開盤已重新站上被跌破的同一條線")
+alertcondition(eitherFirstReclaim, "白線或橙線站回第一根", "{{ticker}} 昨日黑K實體跌破白線或橙線，今日出現第一根有效站回K")
+alertcondition(whiteBodyBreak, "實體跌破白線", "{{ticker}} 黑K實體跌破白線")
+alertcondition(orangeBodyBreak, "實體跌破橙線", "{{ticker}} 黑K實體跌破橙線")

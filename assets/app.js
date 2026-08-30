@@ -1,5 +1,13 @@
 const elements = {
   refresh: document.querySelector("#refresh"),
+  enableLineAlerts: document.querySelector("#enable-line-alerts"),
+  lineReclaimUpdated: document.querySelector("#line-reclaim-updated"),
+  lineReclaimScanCount: document.querySelector("#line-reclaim-scan-count"),
+  lineReclaimNotice: document.querySelector("#line-reclaim-notice"),
+  openingReclaimCount: document.querySelector("#opening-reclaim-count"),
+  firstReclaimCount: document.querySelector("#first-reclaim-count"),
+  openingReclaimSignals: document.querySelector("#opening-reclaim-signals"),
+  firstReclaimSignals: document.querySelector("#first-reclaim-signals"),
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
   systemStatus: document.querySelector("#system-status"),
@@ -34,6 +42,7 @@ let sequentialPayload = null;
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
+const LINE_ALERT_STORAGE_KEY = "kj-radar-daily-open-reclaim-notified-v1";
 const ACTIONS_PAGE_URL = "https://github.com/keeiithjan/us-selloff-radar/actions";
 const ACTIONS_RUNS_URL = "https://api.github.com/repos/keeiithjan/us-selloff-radar/actions/workflows/scan-and-deploy.yml/runs?per_page=1";
 const ACTIONS_POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -281,6 +290,188 @@ function industryText(item) {
 
 function displayMarket(market) {
   return market === "台股個股期貨標的" ? "台股" : (market || "市場");
+}
+
+function lineNames(signal, key) {
+  return (Array.isArray(signal?.[key]) ? signal[key] : [])
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+}
+
+function makeLineReclaimCard(signal, mode) {
+  const field = mode === "opening" ? "opening_reclaim_lines" : "first_reclaim_lines";
+  const lines = lineNames(signal, field);
+  const card = document.createElement("article");
+  card.className = `line-reclaim-card ${mode}${signal.is_live_session ? " is-live" : ""}`;
+
+  const top = document.createElement("div");
+  top.className = "line-reclaim-card-top";
+  const identity = document.createElement("div");
+  const ticker = document.createElement("h3");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const market = document.createElement("p");
+  market.textContent = `${displayMarket(signal.market)} · ${industryText(signal)}`;
+  identity.append(ticker, market);
+  const live = document.createElement("span");
+  live.className = `line-reclaim-session ${signal.is_live_session ? "live" : "closed"}`;
+  live.textContent = signal.is_live_session ? "LIVE" : "最新日K";
+  top.append(identity, live);
+
+  const badges = document.createElement("div");
+  badges.className = "line-reclaim-badges";
+  for (const line of lines) {
+    const badge = document.createElement("span");
+    badge.className = line === "橙線" ? "orange" : "white";
+    badge.textContent = mode === "opening" ? `開盤站回${line}` : `${line}第一根站回`;
+    badges.append(badge);
+  }
+
+  const quote = document.createElement("div");
+  quote.className = "line-reclaim-quote";
+  const price = document.createElement("strong");
+  price.textContent = formatSignalPrice(signal);
+  const change = makeTodayChange(signal.change_pct, "日內");
+  quote.append(price);
+  if (change) quote.append(change);
+
+  const rule = document.createElement("p");
+  rule.className = "line-reclaim-rule";
+  const broken = lineNames(signal, "broken_lines").join("＋") || "目標線";
+  rule.textContent = mode === "opening"
+    ? `前一日黑K實體跌破${broken}；今日開盤重新站上同一條線。`
+    : `前一日黑K實體跌破${broken}；今日為跌破後第一根有效站回K。`;
+
+  const values = document.createElement("p");
+  values.className = "line-reclaim-values";
+  const previousLines = lines.map((line) => `${line} ${plainQuote(line === "橙線" ? signal.previous_orange : signal.previous_white)}`).join(" ／ ");
+  const currentLines = lines.map((line) => `${line} ${plainQuote(line === "橙線" ? signal.current_orange : signal.current_white)}`).join(" ／ ");
+  values.textContent = mode === "opening"
+    ? `今日 O ${plainQuote(signal.open_price)}｜昨日基準 ${previousLines}`
+    : `今日 O ${plainQuote(signal.open_price)} ／ 現價 ${plainQuote(signal.last_price)}｜目前 ${currentLines}`;
+
+  const footer = document.createElement("div");
+  footer.className = "line-reclaim-card-footer";
+  const time = document.createElement("span");
+  time.textContent = signal.bar_time_et || "最新日線";
+  footer.append(time, makeTradingViewLink(signal, "D"));
+
+  card.append(top, badges, quote, rule, values, footer);
+  return card;
+}
+
+function renderLineReclaimList(container, signals, mode) {
+  if (!container) return;
+  if (signals.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "line-reclaim-empty";
+    empty.textContent = mode === "opening"
+      ? "目前沒有符合「前一日實體跌破＋隔日開盤站回」的標的。"
+      : "目前沒有位於跌破後第一根有效站回K的標的。";
+    container.replaceChildren(empty);
+    return;
+  }
+  container.replaceChildren(...signals.map((signal) => makeLineReclaimCard(signal, mode)));
+}
+
+function notifiedLineAlertKeys() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LINE_ALERT_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(value) ? value.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveNotifiedLineAlertKeys(keys) {
+  try {
+    localStorage.setItem(LINE_ALERT_STORAGE_KEY, JSON.stringify([...keys].slice(-250)));
+  } catch {
+    // Private browsing or locked-down storage should not block rendering.
+  }
+}
+
+async function showLineReclaimNotification(signal) {
+  const lines = lineNames(signal, "opening_reclaim_lines").join("＋");
+  const title = `${signal.symbol} 開盤站回${lines}`;
+  const body = `昨日黑K實體跌破${lines}，今日開盤已重新站上。`;
+  const url = tradingViewUrl(signal, "D");
+  if ("serviceWorker" in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(title, {
+        body,
+        icon: "assets/kj-radar-icon.svg",
+        tag: `line-reclaim-${signal.signal_id}-${lines}`,
+        data: { url },
+      });
+      return;
+    } catch (error) {
+      console.warn("PWA通知失敗，改用瀏覽器通知", error);
+    }
+  }
+  const notification = new Notification(title, { body, icon: "assets/kj-radar-icon.svg", tag: `line-reclaim-${signal.signal_id}-${lines}` });
+  notification.onclick = () => window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function notifyOpeningReclaims(signals) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const notified = notifiedLineAlertKeys();
+  for (const signal of signals) {
+    const lines = lineNames(signal, "opening_reclaim_lines").sort().join("+");
+    const key = `${signal.signal_id || signal.tradingview_symbol}:${lines}`;
+    if (!lines || notified.has(key)) continue;
+    notified.add(key);
+    showLineReclaimNotification(signal).catch((error) => console.warn("開盤站回通知失敗", error));
+  }
+  saveNotifiedLineAlertKeys(notified);
+}
+
+function updateLineAlertControls() {
+  if (!elements.enableLineAlerts) return;
+  if (!("Notification" in window)) {
+    elements.enableLineAlerts.textContent = "此瀏覽器不支援通知";
+    elements.enableLineAlerts.disabled = true;
+    return;
+  }
+  const labels = {
+    granted: "網站通知已開啟",
+    denied: "網站通知已封鎖",
+    default: "開啟網站通知",
+  };
+  elements.enableLineAlerts.textContent = labels[Notification.permission] || labels.default;
+  elements.enableLineAlerts.disabled = Notification.permission === "denied";
+}
+
+async function enableLineAlerts() {
+  if (!("Notification" in window)) return;
+  const permission = await Notification.requestPermission();
+  updateLineAlertControls();
+  if (permission === "granted" && sequentialPayload) renderDailyLineReclaims(sequentialPayload);
+}
+
+function renderDailyLineReclaims(payload) {
+  if (!elements.openingReclaimSignals || !elements.firstReclaimSignals) return;
+  const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
+  const dailyFrame = frames.find((frame) => frame.key === "1d") || {};
+  const monitor = dailyFrame.daily_line_reclaims || {};
+  const signals = Array.isArray(monitor.signals) ? monitor.signals : [];
+  const openingSignals = signals.filter((signal) => lineNames(signal, "opening_reclaim_lines").length > 0);
+  const firstSignals = signals.filter((signal) => lineNames(signal, "first_reclaim_lines").length > 0);
+  renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
+  renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
+  elements.openingReclaimCount.textContent = String(openingSignals.length);
+  elements.firstReclaimCount.textContent = String(firstSignals.length);
+  elements.lineReclaimUpdated.textContent = payload?.updated_at_utc
+    ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
+    : "等待首次日線掃描";
+  const markets = Object.entries(monitor.scanned_by_market || {})
+    .map(([market, count]) => `${displayMarket(market)} ${Number(count).toLocaleString("zh-TW")} 檔`)
+    .join("、");
+  elements.lineReclaimScanCount.textContent = monitor.scanned_symbols
+    ? `本輪日線掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
+    : "等待新版日線站回資料";
+  notifyOpeningReclaims(openingSignals);
+  updateLineAlertControls();
 }
 
 function selectedMarkets() {
@@ -1537,6 +1728,7 @@ function makeTimeframe(frame) {
 function renderSequential(payload) {
   sequentialPayload = payload;
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
+  renderDailyLineReclaims(payload);
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   renderTrendReclaims(frames);
   renderWeeklyReclaims(payload);
@@ -1668,6 +1860,7 @@ window.addEventListener("appinstalled", () => {
 });
 
 elements.refresh.addEventListener("click", refresh);
+if (elements.enableLineAlerts) elements.enableLineAlerts.addEventListener("click", enableLineAlerts);
 if (elements.installApp) elements.installApp.addEventListener("click", installApp);
 for (const marketFilter of elements.marketFilters) {
   marketFilter.addEventListener("change", () => {
@@ -1693,5 +1886,6 @@ if (elements.downloadWeeklyTradingViewList) {
   elements.downloadWeeklyTradingViewList.addEventListener("click", downloadWeeklyTradingViewList);
 }
 configureAppInstall();
+updateLineAlertControls();
 refresh();
 setInterval(refresh, 60_000);

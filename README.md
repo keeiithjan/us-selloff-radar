@@ -4,6 +4,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## 保留的首頁模組
 
+- 首頁最上方的日線白線／橙線站回雷達：前一交易日必須先有黑 K 實體由線上跌到線下；隔日開盤重新站上被跌破的同一條線時列入「隔日開盤立即站回」，盤中符合實體完全站回或紅 K 實體穿回時列入「站回第一根」。白線與橙線各自追蹤，並提供頁面／PWA 開啟期間的瀏覽器通知去重。
 - 全球期貨脈搏與可嵌入的 TradingView 即時行情帶
 - 美股 500 檔（跨能源、公用事業、工業國防、核能與原物料、潔淨能源、金融科技、跨國消費、汽車運輸、軟體與醫療等類別）、台股、幣安 USDT 永續與 Pepperstone 高流動性 CFD 的 TD Sequential 9／13 清單
 - 做多：趨勢帶下方死亡交叉後站回白線
@@ -32,6 +33,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## TradingView Pine Screener
 
+- `tradingview/KJ_Daily_White_Orange_Reclaim.pine`：日線黑 K 實體跌破白線／橙線、隔日開盤重新站上同一條線的 Watchlist Alert，以及跌破後第一根站回訊號。
 - `tradingview/KJ_Long_Screener_15m.pine`：固定 15 分鐘掃描。
 - `tradingview/KJ_Long_Screener.pine`：固定 1 小時掃描。
 - `tradingview/KJ_Long_Screener_1D.pine`：固定日線掃描。
@@ -46,5 +48,7 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 GitHub Actions 平日每 30 分鐘更新一次。行情資料主要來自 Yahoo Finance（透過 `yfinance`）、台灣證交所／櫃買中心公開公司基本資料、台灣期交所標的清單，以及 Binance 公開 K 線與成交資料。Pepperstone 商品池依其公開 CFD 商品建置；由於 CFD 沒有集中式成交量，流動性以對應期貨／現貨指數的市場深度作為代理，非 Pepperstone 自身成交量。
 
 GitHub Pages 負責 App 前端與 PWA 離線殼層；GitHub Actions 則是掃描後台，負責更新 `market.json` 與 `sequential.json` 後自動部署。App 每 60 秒重新讀取資料；離線時只顯示上次成功快取的資料。
+
+開盤站回區會在前端取得新一輪 `sequential.json` 後立刻置頂更新；由於 GitHub Pages 是靜態網站，網站資料的新鮮度仍取決於 GitHub Actions 排程。真正逐筆、開盤第一個 tick 的通知仍應以 TradingView Watchlist Alert 為主，網站通知是頁面或 PWA 保持開啟時的補充通道。
 
 資料只供研究與監測，不構成投資建議或買賣訊號。
