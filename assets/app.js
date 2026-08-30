@@ -365,7 +365,7 @@ function renderLineReclaimList(container, signals, mode) {
     const empty = document.createElement("p");
     empty.className = "line-reclaim-empty";
     empty.textContent = mode === "opening"
-      ? "目前沒有符合「前一日實體跌破＋隔日開盤站回」的標的。"
+      ? "目前沒有開盤中的即時站回訊號；休市時不保留前一交易日的開盤事件。"
       : "目前沒有位於跌破後第一根有效站回K的標的。";
     container.replaceChildren(empty);
     return;
@@ -458,7 +458,15 @@ function renderDailyLineReclaims(payload) {
   const dailyFrame = frames.find((frame) => frame.key === "1d") || {};
   const monitor = dailyFrame.daily_line_reclaims || {};
   const signals = Array.isArray(monitor.signals) ? monitor.signals : [];
-  const openingSignals = signals.filter((signal) => lineNames(signal, "opening_reclaim_lines").length > 0);
+  // The left panel is an opening-time live feed, not a history list.  Once a
+  // symbol's market closes (or before its next session opens), its old opening
+  // event disappears.  Completed/latest first-body reclaims remain on the
+  // right so off-hours review still has useful candidates.
+  const openingSignals = signals.filter((signal) => (
+    lineNames(signal, "opening_reclaim_lines").length > 0
+    && signal.is_current_daily_bar
+    && signal.is_live_session
+  ));
   const firstSignals = signals.filter((signal) => lineNames(signal, "first_reclaim_lines").length > 0);
   renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
   renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
