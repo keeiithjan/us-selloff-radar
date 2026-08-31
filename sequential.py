@@ -1124,6 +1124,80 @@ def weekly_bar_is_confirmed(session: MarketSession, now: datetime) -> bool:
     return local_now.time() >= session.session_close
 
 
+def period_line_reclaim_events(
+    frame: pd.DataFrame,
+    timeframe: Timeframe,
+    session: MarketSession,
+    now: datetime,
+) -> list[dict[str, object]]:
+    """Return the live event plus the latest completed-period first reclaim.
+
+    A live daily/weekly candle is needed for opening-reclaim alerts, but it
+    must not replace the right panel's most recent confirmed first-reclaim
+    result.  When the active candle is unfinished, evaluate the completed
+    frame separately and publish both records when applicable.
+    """
+    required = ["Open", "High", "Low", "Close"]
+    if frame.empty or not set(required).issubset(frame.columns):
+        return []
+    ordered = frame.dropna(subset=required).copy().sort_index()
+    if ordered.empty:
+        return []
+
+    newest_index = ordered.index[-1]
+    current_period = is_current_period_bar(newest_index, timeframe, session, now)
+    period_live = current_period and session_is_live(session, now)
+    if timeframe.key == "1w":
+        current_body_confirmed = not current_period or weekly_bar_is_confirmed(session, now)
+    else:
+        current_body_confirmed = not period_live
+
+    results: list[dict[str, object]] = []
+    current_event = daily_line_reclaim_event(
+        ordered,
+        allow_current_body_reclaim=current_body_confirmed,
+    )
+    if current_event is not None:
+        event_index = current_event["bar_index_value"]
+        event_is_current = is_current_period_bar(event_index, timeframe, session, now)
+        results.append(
+            {
+                "event": current_event,
+                "is_current_period_bar": event_is_current,
+                "is_live_session": event_is_current and session_is_live(session, now),
+                "first_reclaim_confirmed": (
+                    bool(current_event.get("first_reclaim_lines"))
+                    and current_body_confirmed
+                ),
+            }
+        )
+
+    if current_body_confirmed or len(ordered) < 2:
+        return results
+
+    confirmed_event = daily_line_reclaim_event(
+        ordered.iloc[:-1],
+        allow_current_body_reclaim=True,
+    )
+    if confirmed_event is None or not confirmed_event.get("first_reclaim_lines"):
+        return results
+
+    # A prior-period opening event is history, not a fresh left-panel alert.
+    confirmed_event["opening_reclaim_lines"] = []
+    event_index = confirmed_event["bar_index_value"]
+    results.append(
+        {
+            "event": confirmed_event,
+            "is_current_period_bar": is_current_period_bar(
+                event_index, timeframe, session, now
+            ),
+            "is_live_session": False,
+            "first_reclaim_confirmed": True,
+        }
+    )
+    return results
+
+
 def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
     """Find a long-only reclaim after a death cross below the ribbon.
 
@@ -1772,18 +1846,12 @@ def collect_signals(
             daily_line_scanned_by_market[instrument.market] = (
                 daily_line_scanned_by_market.get(instrument.market, 0) + 1
             )
-            event_index = raw.index[-1]
-            current_daily_bar = is_current_daily_bar(event_index, instrument.session, now)
-            market_live = current_daily_bar and session_is_live(instrument.session, now)
-            live_event = daily_line_reclaim_event(
-                raw,
-                allow_current_body_reclaim=not market_live,
-            )
-            if live_event is not None:
+            for period_event in period_line_reclaim_events(
+                raw, timeframe, instrument.session, now
+            ):
+                live_event = dict(period_event["event"])
                 event_index = live_event.pop("bar_index_value")
-                current_daily_bar = is_current_period_bar(
-                    event_index, timeframe, instrument.session, now
-                )
+                current_daily_bar = bool(period_event["is_current_period_bar"])
                 product_category = product_category_for(instrument, public_profile_cache)
                 tradingview_symbol = tradingview_symbol_for(instrument)
                 bar_date = pd.Timestamp(event_index)
@@ -1804,9 +1872,9 @@ def collect_signals(
                         "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
                         "is_current_daily_bar": current_daily_bar,
                         "is_current_period_bar": current_daily_bar,
-                        "is_live_session": market_live,
-                        "first_reclaim_confirmed": (
-                            bool(live_event.get("first_reclaim_lines")) and not market_live
+                        "is_live_session": bool(period_event["is_live_session"]),
+                        "first_reclaim_confirmed": bool(
+                            period_event["first_reclaim_confirmed"]
                         ),
                         **live_event,
                     }
@@ -1987,23 +2055,12 @@ def collect_weekly_reclaims(
             line_reclaim_scanned_by_market[instrument.market] = (
                 line_reclaim_scanned_by_market.get(instrument.market, 0) + 1
             )
-            newest_index = raw.index[-1]
-            current_period_bar = is_current_period_bar(
-                newest_index, timeframe, instrument.session, now
-            )
-            current_body_confirmed = (
-                not current_period_bar
-                or weekly_bar_is_confirmed(instrument.session, now)
-            )
-            line_event = daily_line_reclaim_event(
-                raw,
-                allow_current_body_reclaim=current_body_confirmed,
-            )
-            if line_event is not None:
+            for period_event in period_line_reclaim_events(
+                raw, timeframe, instrument.session, now
+            ):
+                line_event = dict(period_event["event"])
                 event_index = line_event.pop("bar_index_value")
-                current_period_bar = is_current_period_bar(
-                    event_index, timeframe, instrument.session, now
-                )
+                current_period_bar = bool(period_event["is_current_period_bar"])
                 product_category = product_category_for(instrument, public_profile_cache)
                 tradingview_symbol = tradingview_symbol_for(instrument)
                 bar_date = pd.Timestamp(event_index)
@@ -2024,10 +2081,9 @@ def collect_weekly_reclaims(
                         "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
                         "is_current_daily_bar": current_period_bar,
                         "is_current_period_bar": current_period_bar,
-                        "is_live_session": current_period_bar and session_is_live(instrument.session, now),
-                        "first_reclaim_confirmed": (
-                            bool(line_event.get("first_reclaim_lines"))
-                            and current_body_confirmed
+                        "is_live_session": bool(period_event["is_live_session"]),
+                        "first_reclaim_confirmed": bool(
+                            period_event["first_reclaim_confirmed"]
                         ),
                         **line_event,
                     }

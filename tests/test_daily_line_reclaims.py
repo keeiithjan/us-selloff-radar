@@ -2,7 +2,7 @@ import unittest
 import sys
 import types
 from unittest.mock import patch
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -12,10 +12,12 @@ import pandas as pd
 sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
 
 from sequential import (
+    TIMEFRAMES,
     US_SESSION,
     WEEKLY_RECLAIM_TIMEFRAME,
     daily_line_reclaim_event,
     is_current_period_bar,
+    period_line_reclaim_events,
     weekly_bar_is_confirmed,
 )
 
@@ -220,6 +222,60 @@ class DailyLineReclaimTests(unittest.TestCase):
                 datetime(2026, 9, 4, 16, 0, tzinfo=timezone),
             )
         )
+
+    def test_weekly_keeps_previous_confirmed_reclaim_during_live_week(self) -> None:
+        frame = base_frame()
+        frame.index = pd.date_range("2024-10-07", periods=len(frame), freq="W-MON")
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.0
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.4
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 100.8
+        latest_monday = frame.index[-1].date()
+        now = datetime.combine(
+            latest_monday + timedelta(days=1),
+            datetime.min.time().replace(hour=13),
+            tzinfo=ZoneInfo("America/New_York"),
+        )
+
+        events = period_line_reclaim_events(
+            frame,
+            WEEKLY_RECLAIM_TIMEFRAME,
+            US_SESSION,
+            now,
+        )
+        confirmed = [event for event in events if event["first_reclaim_confirmed"]]
+
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(
+            confirmed[0]["event"]["bar_index_value"],
+            frame.index[-2],
+        )
+        self.assertEqual(confirmed[0]["event"]["first_reclaim_lines"], ["白線"])
+        self.assertEqual(confirmed[0]["event"]["opening_reclaim_lines"], [])
+
+    def test_daily_keeps_previous_confirmed_reclaim_during_live_session(self) -> None:
+        frame = base_frame()
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.0
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.4
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 100.8
+        latest_date = frame.index[-1].date()
+        now = datetime.combine(
+            latest_date,
+            datetime.min.time().replace(hour=13),
+            tzinfo=ZoneInfo("America/New_York"),
+        )
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+
+        events = period_line_reclaim_events(frame, daily, US_SESSION, now)
+        confirmed = [event for event in events if event["first_reclaim_confirmed"]]
+
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(
+            confirmed[0]["event"]["bar_index_value"],
+            frame.index[-2],
+        )
+        self.assertEqual(confirmed[0]["event"]["first_reclaim_lines"], ["白線"])
 
 
 if __name__ == "__main__":
