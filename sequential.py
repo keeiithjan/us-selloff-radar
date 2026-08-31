@@ -943,9 +943,32 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
         red_body_cross = close_value > open_value and open_value <= target and close_value > target
         return body_fully_above or red_body_cross
 
-    # The opening notification only uses yesterday's confirmed breakdown.
-    broke_white = body_breaks(previous_open, previous_close, previous_white)
-    broke_orange = body_breaks(previous_open, previous_close, previous_orange)
+    def pending_break_before_current(line_column: str) -> int | None:
+        """Return the newest unreclaimed body break before today's bar.
+
+        The opening panel must not accept a stock that merely opens above a
+        line.  It does, however, need to keep an earlier confirmed real-body
+        break active until the first later valid reclaim, matching the Pine
+        screener's opening-reclaim state.
+        """
+        pending_position: int | None = None
+        for position in range(len(clean) - 1):
+            line_value = features[line_column].iloc[position]
+            open_value = clean["Open"].iloc[position]
+            close_value = clean["Close"].iloc[position]
+            if not all(np.isfinite(float(value)) for value in (line_value, open_value, close_value)):
+                continue
+            line_float = float(line_value)
+            open_float = float(open_value)
+            close_float = float(close_value)
+            if pending_position is not None and body_reclaims(open_float, close_float, line_float):
+                pending_position = None
+            if body_breaks(open_float, close_float, line_float):
+                pending_position = position
+        return pending_position
+
+    white_opening_break_position = pending_break_before_current("white_kernel")
+    orange_opening_break_position = pending_break_before_current("orange_upper")
 
     # Track each breakdown until its first later valid body reclaim.  A reclaim
     # on an earlier bar clears the pending state, so a continuously-above body
@@ -980,12 +1003,10 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
 
     opening_lines: list[str] = []
     first_reclaim_lines: list[str] = []
-    if broke_white:
-        if current_open > previous_white:
-            opening_lines.append("白線")
-    if broke_orange:
-        if current_open > previous_orange:
-            opening_lines.append("橙線")
+    if white_opening_break_position is not None and current_open > previous_white:
+        opening_lines.append("白線")
+    if orange_opening_break_position is not None and current_open > previous_orange:
+        opening_lines.append("橙線")
     if white_first_break_position is not None:
         first_reclaim_lines.append("白線")
     if orange_first_break_position is not None:
@@ -996,8 +1017,8 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     broken_lines = [
         line
         for line, active in (
-            ("白線", broke_white or white_first_break_position is not None),
-            ("橙線", broke_orange or orange_first_break_position is not None),
+            ("白線", white_opening_break_position is not None or white_first_break_position is not None),
+            ("橙線", orange_opening_break_position is not None or orange_first_break_position is not None),
         )
         if active
     ]

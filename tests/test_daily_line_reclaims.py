@@ -101,6 +101,26 @@ class DailyLineReclaimTests(unittest.TestCase):
         self.assertEqual(event["first_reclaim_lines"], ["白線"])
         self.assertEqual(event["first_reclaim_break_bars_ago"], {"白線": 2})
 
+    def test_opening_reclaim_keeps_an_earlier_unreclaimed_body_break(self) -> None:
+        frame = base_frame()
+        # A white-line body break occurs two completed sessions ago.
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.0
+        # It remains below the line on the following session, so the break is
+        # still pending rather than being discarded after one day.
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.3
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 99.1
+        # Today's open jumps back above yesterday's white line.
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 100.7
+        frame.iloc[-1, frame.columns.get_loc("High")] = 101.0
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 100.5
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.9
+
+        event = daily_line_reclaim_event(frame)
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["opening_reclaim_lines"], ["白線"])
+
     def test_first_reclaim_is_not_repeated_on_later_bars(self) -> None:
         frame = base_frame()
         frame.iloc[-4, frame.columns.get_loc("Open")] = 100.6
