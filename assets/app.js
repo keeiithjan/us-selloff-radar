@@ -8,6 +8,8 @@ const elements = {
   firstReclaimCount: document.querySelector("#first-reclaim-count"),
   openingReclaimSignals: document.querySelector("#opening-reclaim-signals"),
   firstReclaimSignals: document.querySelector("#first-reclaim-signals"),
+  lineReclaimLineFilters: [...document.querySelectorAll("[data-reclaim-line]")],
+  lineReclaimMarketFilters: [...document.querySelectorAll("[data-reclaim-market]")],
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
   systemStatus: document.querySelector("#system-status"),
@@ -39,6 +41,7 @@ const elements = {
 };
 
 let sequentialPayload = null;
+const lineReclaimFilterState = { line: "all", market: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -298,6 +301,36 @@ function lineNames(signal, key) {
     .filter(Boolean);
 }
 
+function lineReclaimMarketGroup(signal) {
+  const market = displayMarket(signal?.market);
+  if (market === "台股") return "taiwan";
+  if (market === "美股") return "us";
+  return "other";
+}
+
+function filteredLineReclaims(signals, field) {
+  return signals.filter((signal) => {
+    const matchesLine = lineReclaimFilterState.line === "all"
+      || lineNames(signal, field).includes(lineReclaimFilterState.line);
+    const matchesMarket = lineReclaimFilterState.market === "all"
+      || lineReclaimMarketGroup(signal) === lineReclaimFilterState.market;
+    return matchesLine && matchesMarket;
+  });
+}
+
+function updateLineReclaimFilterControls() {
+  for (const button of elements.lineReclaimLineFilters) {
+    const active = button.dataset.reclaimLine === lineReclaimFilterState.line;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  for (const button of elements.lineReclaimMarketFilters) {
+    const active = button.dataset.reclaimMarket === lineReclaimFilterState.market;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
 function makeLineReclaimCard(signal, mode) {
   const field = mode === "opening" ? "opening_reclaim_lines" : "first_reclaim_lines";
   const lines = lineNames(signal, field);
@@ -462,12 +495,14 @@ function renderDailyLineReclaims(payload) {
   // symbol's market closes (or before its next session opens), its old opening
   // event disappears.  Completed/latest first-body reclaims remain on the
   // right so off-hours review still has useful candidates.
-  const openingSignals = signals.filter((signal) => (
+  const liveOpeningSignals = signals.filter((signal) => (
     lineNames(signal, "opening_reclaim_lines").length > 0
     && signal.is_current_daily_bar
     && signal.is_live_session
   ));
-  const firstSignals = signals.filter((signal) => lineNames(signal, "first_reclaim_lines").length > 0);
+  const latestFirstSignals = signals.filter((signal) => lineNames(signal, "first_reclaim_lines").length > 0);
+  const openingSignals = filteredLineReclaims(liveOpeningSignals, "opening_reclaim_lines");
+  const firstSignals = filteredLineReclaims(latestFirstSignals, "first_reclaim_lines");
   renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
   renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
   elements.openingReclaimCount.textContent = String(openingSignals.length);
@@ -481,8 +516,9 @@ function renderDailyLineReclaims(payload) {
   elements.lineReclaimScanCount.textContent = monitor.scanned_symbols
     ? `本輪日線掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
     : "等待新版日線站回資料";
-  notifyOpeningReclaims(openingSignals);
+  notifyOpeningReclaims(liveOpeningSignals);
   updateLineAlertControls();
+  updateLineReclaimFilterControls();
 }
 
 function selectedMarkets() {
@@ -1890,6 +1926,18 @@ elements.sequentialMomentum.addEventListener("change", () => {
 if (elements.weeklyReclaimFilter) {
   elements.weeklyReclaimFilter.addEventListener("change", () => {
     if (sequentialPayload) renderWeeklyReclaims(sequentialPayload);
+  });
+}
+for (const button of elements.lineReclaimLineFilters) {
+  button.addEventListener("click", () => {
+    lineReclaimFilterState.line = button.dataset.reclaimLine || "all";
+    if (sequentialPayload) renderDailyLineReclaims(sequentialPayload);
+  });
+}
+for (const button of elements.lineReclaimMarketFilters) {
+  button.addEventListener("click", () => {
+    lineReclaimFilterState.market = button.dataset.reclaimMarket || "all";
+    if (sequentialPayload) renderDailyLineReclaims(sequentialPayload);
   });
 }
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);

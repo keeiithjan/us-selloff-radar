@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260831-line-reclaim3">
+    <link rel="stylesheet" href="assets/styles.css?v=20260831-line-reclaim4">
   </head>
   <body>
     <main class="shell">
@@ -35,6 +35,25 @@
           <p id="line-reclaim-updated">正在讀取日線訊號…</p>
           <p id="line-reclaim-scan-count">等待掃描資料</p>
           <p id="line-reclaim-notice">網站通知需保持此頁或已安裝的 PWA 開啟；TradingView 清單警報仍是開盤即時通知主通道。</p>
+        </div>
+        <div class="line-reclaim-filters" aria-label="站回雷達分類器">
+          <div class="line-reclaim-filter-group">
+            <span>線別</span>
+            <div role="group" aria-label="依線別篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-reclaim-line="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter" type="button" data-reclaim-line="白線" aria-pressed="false">白線</button>
+              <button class="line-reclaim-filter orange" type="button" data-reclaim-line="橙線" aria-pressed="false">橙線</button>
+            </div>
+          </div>
+          <div class="line-reclaim-filter-group">
+            <span>市場</span>
+            <div role="group" aria-label="依市場篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-reclaim-market="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter" type="button" data-reclaim-market="taiwan" aria-pressed="false">台股</button>
+              <button class="line-reclaim-filter" type="button" data-reclaim-market="us" aria-pressed="false">美股</button>
+              <button class="line-reclaim-filter" type="button" data-reclaim-market="other" aria-pressed="false">其他</button>
+            </div>
+          </div>
         </div>
         <div class="line-reclaim-columns">
           <section class="line-reclaim-panel opening" aria-labelledby="opening-reclaim-title">
@@ -219,6 +238,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260831-line-reclaim3"></script>
+    <script src="assets/app.js?v=20260831-line-reclaim4"></script>
   </body>
 </html>
