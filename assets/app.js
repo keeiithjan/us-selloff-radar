@@ -1947,4 +1947,7 @@ if (elements.downloadWeeklyTradingViewList) {
 configureAppInstall();
 updateLineAlertControls();
 refresh();
-setInterval(refresh, 60_000);
+// The daily opening-reclaim panel is time-sensitive.  Data itself is fetched
+// network-first, so this reflects a freshly deployed opening signal within
+// seconds rather than waiting a full minute for the next page refresh.
+setInterval(refresh, 15_000);

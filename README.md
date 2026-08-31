@@ -45,9 +45,9 @@ GitHub Pages 上的多市場 TD Sequential 監測頁面。
 
 ## 更新與資料來源
 
-GitHub Actions 平日每 30 分鐘更新一次。行情資料主要來自 Yahoo Finance（透過 `yfinance`）、台灣證交所／櫃買中心公開公司基本資料、台灣期交所標的清單，以及 Binance 公開 K 線與成交資料。Pepperstone 商品池依其公開 CFD 商品建置；由於 CFD 沒有集中式成交量，流動性以對應期貨／現貨指數的市場深度作為代理，非 Pepperstone 自身成交量。
+GitHub Actions 平日每 10 分鐘更新一次，並在每個小時的第 1 分鐘啟動掃描，讓台股 09:00 與美股 09:30 開盤後的站回訊號優先進入下一輪部署。行情資料主要來自 Yahoo Finance（透過 `yfinance`）、台灣證交所／櫃買中心公開公司基本資料、台灣期交所標的清單，以及 Binance 公開 K 線與成交資料。Pepperstone 商品池依其公開 CFD 商品建置；由於 CFD 沒有集中式成交量，流動性以對應期貨／現貨指數的市場深度作為代理，非 Pepperstone 自身成交量。
 
-GitHub Pages 負責 App 前端與 PWA 離線殼層；GitHub Actions 則是掃描後台，負責更新 `market.json` 與 `sequential.json` 後自動部署。App 每 60 秒重新讀取資料；離線時只顯示上次成功快取的資料。
+GitHub Pages 負責 App 前端與 PWA 離線殼層；GitHub Actions 則是掃描後台，負責更新 `market.json` 與 `sequential.json` 後自動部署。App 每 15 秒重新讀取資料；離線時只顯示上次成功快取的資料。
 
 開盤站回區會在前端取得新一輪 `sequential.json` 後立刻置頂更新；由於 GitHub Pages 是靜態網站，網站資料的新鮮度仍取決於 GitHub Actions 排程。真正逐筆、開盤第一個 tick 的通知仍應以 TradingView Watchlist Alert 為主，網站通知是頁面或 PWA 保持開啟時的補充通道。
 
