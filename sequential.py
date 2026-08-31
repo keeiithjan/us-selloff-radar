@@ -892,7 +892,7 @@ def daily_line_reclaim_event(
     *,
     allow_current_body_reclaim: bool = True,
 ) -> dict[str, object] | None:
-    """Return the current daily white/orange breakdown-reclaim event.
+    """Return the current-period white/orange breakdown-reclaim event.
 
     Opening reclaim requires an earlier black real-body break of the selected
     line and an opening price above that line's value at the current bar's
@@ -1077,14 +1077,30 @@ def daily_line_reclaim_event(
     }
 
 
-def is_current_daily_bar(index_value: object, session: MarketSession, now: datetime) -> bool:
-    """Whether a daily row belongs to the instrument's current local date."""
+def is_current_period_bar(
+    index_value: object,
+    timeframe: Timeframe,
+    session: MarketSession,
+    now: datetime,
+) -> bool:
+    """Whether the newest row belongs to the current local day or week."""
     timestamp = pd.Timestamp(index_value)
     if timestamp.tzinfo is None:
         bar_date = timestamp.date()
     else:
         bar_date = timestamp.tz_convert(session.timezone).date()
-    return bar_date == now.astimezone(session.timezone).date()
+    current_date = now.astimezone(session.timezone).date()
+    if timeframe.key == "1w":
+        bar_iso = bar_date.isocalendar()
+        current_iso = current_date.isocalendar()
+        return (bar_iso.year, bar_iso.week) == (current_iso.year, current_iso.week)
+    return bar_date == current_date
+
+
+def is_current_daily_bar(index_value: object, session: MarketSession, now: datetime) -> bool:
+    """Backwards-compatible wrapper used by existing daily tests/callers."""
+    daily = next(item for item in TIMEFRAMES if item.key == "1d")
+    return is_current_period_bar(index_value, daily, session, now)
 
 
 def session_is_live(session: MarketSession, now: datetime) -> bool:
@@ -1096,6 +1112,16 @@ def session_is_live(session: MarketSession, now: datetime) -> bool:
         local_now.weekday() < 5
         and session.session_open <= local_now.time() < session.session_close
     )
+
+
+def weekly_bar_is_confirmed(session: MarketSession, now: datetime) -> bool:
+    """Whether the active stock-market weekly candle has finished."""
+    local_now = now.astimezone(session.timezone)
+    if local_now.weekday() > 4:
+        return True
+    if local_now.weekday() < 4 or session.session_close is None:
+        return False
+    return local_now.time() >= session.session_close
 
 
 def trend_reclaim_events(features: pd.DataFrame | None) -> list[dict[str, int]]:
@@ -1285,6 +1311,8 @@ def format_bar_time(index_value: object, timeframe: Timeframe, session: MarketSe
     if timestamp.tzinfo is None:
         timestamp = timestamp.tz_localize(session.timezone)
     timestamp = timestamp.tz_convert(session.timezone)
+    if timeframe.key == "1w":
+        return timestamp.strftime("%Y-%m-%d 週線")
     if timeframe.duration is None:
         return timestamp.strftime("%Y-%m-%d 日線")
     zone_name = "台北" if session.timezone == TAIPEI else "ET" if session.timezone == NEW_YORK else "UTC"
@@ -1753,6 +1781,9 @@ def collect_signals(
             )
             if live_event is not None:
                 event_index = live_event.pop("bar_index_value")
+                current_daily_bar = is_current_period_bar(
+                    event_index, timeframe, instrument.session, now
+                )
                 product_category = product_category_for(instrument, public_profile_cache)
                 tradingview_symbol = tradingview_symbol_for(instrument)
                 bar_date = pd.Timestamp(event_index)
@@ -1760,7 +1791,8 @@ def collect_signals(
                     bar_date = bar_date.tz_convert(instrument.session.timezone)
                 daily_line_reclaim_signals.append(
                     {
-                        "signal_id": f"{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "signal_id": f"{timeframe.key}:{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "timeframe_key": timeframe.key,
                         "symbol": instrument.symbol,
                         "name": instrument.name,
                         "industry": instrument.industry,
@@ -1771,6 +1803,7 @@ def collect_signals(
                         "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
                         "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
                         "is_current_daily_bar": current_daily_bar,
+                        "is_current_period_bar": current_daily_bar,
                         "is_live_session": market_live,
                         "first_reclaim_confirmed": (
                             bool(live_event.get("first_reclaim_lines")) and not market_live
@@ -1944,10 +1977,61 @@ def collect_weekly_reclaims(
     records.extend(download_taiwan_records(taiwan_underlyings, taiwan_industries, timeframe))
     records.extend(download_binance_records(binance_instruments, timeframe))
     signals: list[dict[str, object]] = []
+    line_reclaim_signals: list[dict[str, object]] = []
+    line_reclaim_scanned_by_market: dict[str, int] = {}
     weekly_candidates: list[tuple[dict[str, object], Instrument, object]] = []
     scanned_by_market: dict[str, int] = {}
 
     for instrument, raw in records:
+        if not raw.empty:
+            line_reclaim_scanned_by_market[instrument.market] = (
+                line_reclaim_scanned_by_market.get(instrument.market, 0) + 1
+            )
+            newest_index = raw.index[-1]
+            current_period_bar = is_current_period_bar(
+                newest_index, timeframe, instrument.session, now
+            )
+            current_body_confirmed = (
+                not current_period_bar
+                or weekly_bar_is_confirmed(instrument.session, now)
+            )
+            line_event = daily_line_reclaim_event(
+                raw,
+                allow_current_body_reclaim=current_body_confirmed,
+            )
+            if line_event is not None:
+                event_index = line_event.pop("bar_index_value")
+                current_period_bar = is_current_period_bar(
+                    event_index, timeframe, instrument.session, now
+                )
+                product_category = product_category_for(instrument, public_profile_cache)
+                tradingview_symbol = tradingview_symbol_for(instrument)
+                bar_date = pd.Timestamp(event_index)
+                if bar_date.tzinfo is not None:
+                    bar_date = bar_date.tz_convert(instrument.session.timezone)
+                line_reclaim_signals.append(
+                    {
+                        "signal_id": f"1w:{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "timeframe_key": "1w",
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol,
+                        "market": instrument.market,
+                        "bar_time_et": format_weekly_bar_time(event_index, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                        "is_current_daily_bar": current_period_bar,
+                        "is_current_period_bar": current_period_bar,
+                        "is_live_session": current_period_bar and session_is_live(instrument.session, now),
+                        "first_reclaim_confirmed": (
+                            bool(line_event.get("first_reclaim_lines"))
+                            and current_body_confirmed
+                        ),
+                        **line_event,
+                    }
+                )
         frame = raw.dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
         if len(frame) < WEEKLY_AI_MINIMUM_BARS:
             continue
@@ -2056,6 +2140,13 @@ def collect_weekly_reclaims(
             str(item["tradingview_symbol"]),
         )
     )
+    line_reclaim_signals.sort(
+        key=lambda item: (
+            not bool(item.get("opening_reclaim_lines")),
+            str(item.get("market") or ""),
+            str(item.get("tradingview_symbol") or ""),
+        )
+    )
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -2066,6 +2157,11 @@ def collect_weekly_reclaims(
         "scanned_symbols": sum(scanned_by_market.values()),
         "scanned_by_market": scanned_by_market,
         "signals": signals,
+        "line_reclaims": {
+            "scanned_symbols": sum(line_reclaim_scanned_by_market.values()),
+            "scanned_by_market": line_reclaim_scanned_by_market,
+            "signals": line_reclaim_signals,
+        },
     }
 
 

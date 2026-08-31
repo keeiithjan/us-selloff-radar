@@ -2,6 +2,8 @@ import unittest
 import sys
 import types
 from unittest.mock import patch
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -9,7 +11,13 @@ import pandas as pd
 # network client in the local test runtime.
 sys.modules.setdefault("yfinance", types.ModuleType("yfinance"))
 
-from sequential import daily_line_reclaim_event
+from sequential import (
+    US_SESSION,
+    WEEKLY_RECLAIM_TIMEFRAME,
+    daily_line_reclaim_event,
+    is_current_period_bar,
+    weekly_bar_is_confirmed,
+)
 
 
 def base_frame() -> pd.DataFrame:
@@ -182,6 +190,36 @@ class DailyLineReclaimTests(unittest.TestCase):
         frame.iloc[-1, frame.columns.get_loc("Close")] = 100.9
 
         self.assertIsNone(daily_line_reclaim_event(frame))
+
+    def test_weekly_bar_stays_current_through_the_same_iso_week(self) -> None:
+        now = datetime(2026, 9, 1, 13, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        self.assertTrue(
+            is_current_period_bar(
+                pd.Timestamp("2026-08-31"), WEEKLY_RECLAIM_TIMEFRAME, US_SESSION, now
+            )
+        )
+        self.assertFalse(
+            is_current_period_bar(
+                pd.Timestamp("2026-08-24"), WEEKLY_RECLAIM_TIMEFRAME, US_SESSION, now
+            )
+        )
+
+    def test_weekly_body_reclaim_waits_for_friday_close(self) -> None:
+        timezone = ZoneInfo("America/New_York")
+
+        self.assertFalse(
+            weekly_bar_is_confirmed(
+                US_SESSION,
+                datetime(2026, 9, 4, 15, 59, tzinfo=timezone),
+            )
+        )
+        self.assertTrue(
+            weekly_bar_is_confirmed(
+                US_SESSION,
+                datetime(2026, 9, 4, 16, 0, tzinfo=timezone),
+            )
+        )
 
 
 if __name__ == "__main__":

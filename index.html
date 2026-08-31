@@ -15,16 +15,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260831-line-reclaim7">
+    <link rel="stylesheet" href="assets/styles.css?v=20260901-line-reclaim8">
   </head>
   <body>
     <main class="shell">
       <section class="line-reclaim-command" aria-labelledby="line-reclaim-title">
         <div class="line-reclaim-command-head">
           <div>
-            <p class="eyebrow">DAILY OPEN RECLAIM · PRIORITY FEED</p>
+            <p class="eyebrow">DAILY / WEEKLY OPEN RECLAIM · PRIORITY FEED</p>
             <h1 id="line-reclaim-title">白線／橙線開盤站回雷達</h1>
-            <p class="line-reclaim-lede">左側只在台股／美股開盤期間顯示先前黑 K 實體跌破後、且今日開盤高於當根開盤基準線的站回；休市後不保留舊開盤事件。右側只在各市場日線收盤確認後，加入第一根有效實體站回名單。</p>
+            <p class="line-reclaim-lede">可切換日線／週線。左側只在市場交易期間顯示先前黑 K 實體跌破後、當根開盤高於同一條線的開盤基準；休市後不保留舊開盤事件。右側只在各週期收盤確認後加入第一次有效實體站回，與當根開盤位置無關。</p>
           </div>
           <div class="line-reclaim-command-actions">
             <span class="line-reclaim-live"><i aria-hidden="true"></i> 15S AUTO REFRESH</span>
@@ -37,6 +37,13 @@
           <p id="line-reclaim-notice">網站通知需保持此頁或已安裝的 PWA 開啟；TradingView 清單警報仍是開盤即時通知主通道。</p>
         </div>
         <div class="line-reclaim-filters" aria-label="站回雷達分類器">
+          <div class="line-reclaim-filter-group">
+            <span>週期</span>
+            <div role="group" aria-label="依週期篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-reclaim-timeframe="1d" aria-pressed="true">日線</button>
+              <button class="line-reclaim-filter" type="button" data-reclaim-timeframe="1w" aria-pressed="false">週線</button>
+            </div>
+          </div>
           <div class="line-reclaim-filter-group">
             <span>線別</span>
             <div role="group" aria-label="依線別篩選">
@@ -71,8 +78,8 @@
           <section class="line-reclaim-panel first" aria-labelledby="first-reclaim-title">
             <div class="line-reclaim-panel-head">
               <div>
-                <p class="eyebrow">CONFIRMED DAILY RECLAIM</p>
-                <h2 id="first-reclaim-title">已確認站回第一根</h2>
+                <p class="eyebrow">CONFIRMED FIRST RECLAIM BAR</p>
+                <h2 id="first-reclaim-title">已確認日線站回第一根</h2>
               </div>
               <strong id="first-reclaim-count" class="line-reclaim-count">0</strong>
             </div>
@@ -238,6 +245,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260831-line-reclaim7"></script>
+    <script src="assets/app.js?v=20260901-line-reclaim8"></script>
   </body>
 </html>

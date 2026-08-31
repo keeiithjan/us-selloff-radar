@@ -1,79 +1,465 @@
-// This source code is subject to the terms of the Mozilla Public License 2.0.
-// Original AI Momentum line calculations: © YinYangAlgorithms
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// Original indicator: © YinYangAlgorithms
 
 //@version=5
-indicator("KJ 日線白線／橙線跌破隔日站回", overlay = true)
+indicator("AI Momentum 日／週白線／橙線跌破站回 Screener", overlay = true)
 
 import jdehorty/KernelFunctions/2 as kernels
 
+// ─────────────────────────────────────────────
+// 線條設定
+// ─────────────────────────────────────────────
 lookbackWindow = input.int(8, "Lookback Window", minval = 3, maxval = 50, group = "線條設定")
 relativeWeighting = input.float(8.0, "Relative Weighting", minval = 0.25, maxval = 25, step = 0.25, group = "線條設定")
 startBar = input.int(25, "Start Regression at Bar", minval = 1, group = "線條設定")
-zoneLength = input.int(50, "橙線 Highest High Length", minval = 1, group = "線條設定")
-showLines = input.bool(true, "顯示白線與橙線", group = "圖表顯示")
-enableImmediateAlert = input.bool(true, "啟用開盤立即通知", group = "通知")
+zoneLengths = input.int(50, "橙色線 Highest High Length", minval = 1, group = "線條設定")
 
-whiteLine = kernels.rationalQuadratic(close, lookbackWindow, relativeWeighting, startBar)
-orangeLine = kernels.rationalQuadratic(ta.highest(high, zoneLength), lookbackWindow, relativeWeighting, startBar)
+chartWhite = kernels.rationalQuadratic(close, lookbackWindow, relativeWeighting, startBar)
+orangeLine = kernels.rationalQuadratic(ta.highest(high, zoneLengths), lookbackWindow, relativeWeighting, startBar)
 
+// 最右側當根「開盤瞬間」的線值
+openingWhiteLine = kernels.rationalQuadratic(
+     barstate.islast ? open : close,
+     lookbackWindow,
+     relativeWeighting,
+     startBar)
+
+openingOrangeLine = kernels.rationalQuadratic(
+     ta.highest(barstate.islast ? open : high, zoneLengths),
+     lookbackWindow,
+     relativeWeighting,
+     startBar)
+
+weeklyWhite = request.security(
+     syminfo.tickerid,
+     "1W",
+     kernels.rationalQuadratic(close, lookbackWindow, relativeWeighting, startBar),
+     gaps = barmerge.gaps_off,
+     lookahead = barmerge.lookahead_off)
+
+// 日線與週線共用同一套跌破、下一根開盤站回與第一根實體站回行為。
+supportedReclaimTimeframe = timeframe.isdaily or timeframe.isweekly
+
+// ─────────────────────────────────────────────
+// 訊號設定
+// ─────────────────────────────────────────────
+reclaimMode = input.string(
+     "實體站上或紅K穿越",
+     "站回定義（白線與橙線共用）",
+     options = ["實體站上或紅K穿越", "收盤站回線上", "實體完全站上線上", "紅K實體穿越線"],
+     group = "訊號設定")
+
+maxBarsToReclaim = input.int(1, "跌破後允許幾根內站回", minval = 1, maxval = 20, group = "訊號設定")
+postReclaimBars = input.int(3, "站回後保留幾根", minval = 1, maxval = 50, group = "訊號設定")
+
+scanStage = input.string(
+     "站回當根＋後 N 根",
+     "篩選階段",
+     options = [
+         "實體跌破白線", "實體跌破橙色線", "實體跌破白線或橙色線",
+         "未收盤暫時白線實體跌破", "未收盤暫時橙線實體跌破",
+         "未收盤暫時白線實體站回", "未收盤暫時橙線實體站回", "未收盤暫時跌破或站回",
+         "白線實體跌破後指定根數", "橙色線實體跌破後指定根數", "白線或橙線實體跌破後指定根數",
+         "下一根開盤站回白線或橙線", "下一根開盤在白線上", "下一根開盤在橙線上",
+         "白線站回當根", "橙線站回當根", "白線或橙線站回當根",
+         "白線站回後 N 根", "橙線站回後 N 根",
+         "白線站回當根＋後 N 根", "橙線站回當根＋後 N 根", "站回當根＋後 N 根"
+     ],
+     group = "篩選設定")
+
+requireWeeklyAbove = input.bool(false, "篩選命中必須在週白線以上", group = "篩選設定")
+confirmedBarsOnly = input.bool(true, "只用已收盤 K 棒確認", group = "篩選設定")
+
+breakBarsAgoMin = input.int(
+     0,
+     "跌破後最少第幾根（0＝跌破當根）",
+     minval = 0,
+     maxval = 100,
+     group = "篩選設定")
+
+breakBarsAgoMax = input.int(
+     20,
+     "跌破後最多第幾根",
+     minval = 0,
+     maxval = 100,
+     group = "篩選設定")
+
+requireAboveDuringRetention = input.bool(
+     true,
+     "站回後 N 根須維持收盤在線上",
+     group = "篩選設定")
+
+enableNextOpenAlert = input.bool(true, "啟用下一根開盤立即通知", group = "通知設定")
+
+enableWhiteOpenReclaim = input.bool(
+     true,
+     "本週期開盤立即確認白線站回",
+     group = "通知設定")
+
+enableOrangeOpenReclaim = input.bool(
+     true,
+     "本週期開盤立即確認橙線站回",
+     group = "通知設定")
+
+showLines = input.bool(true, "顯示白線、橙色線與週線白線", group = "圖表顯示")
+showMarks = input.bool(true, "顯示跌破／站回標記", group = "圖表顯示")
+shadeRecent = input.bool(false, "標示站回後 N 根區間", group = "圖表顯示")
+
+showTemporaryIntrabarSignals = input.bool(
+     true,
+     "顯示未收盤暫時跌破／站回",
+     group = "圖表顯示")
+
+// ─────────────────────────────────────────────
+// K棒方向
+// ─────────────────────────────────────────────
 isBlackK = close < open
 isRedK = close > open
 
-// The prior candle must be a confirmed black real-body cross down.
-whiteBodyBreak = isBlackK and open >= whiteLine and close < whiteLine and barstate.isconfirmed
-orangeBodyBreak = isBlackK and open >= orangeLine and close < orangeLine and barstate.isconfirmed
+// ─────────────────────────────────────────────
+// 實體跌破
+// ─────────────────────────────────────────────
+whiteBodyCrossDown = isBlackK and open >= chartWhite and close < chartWhite
+orangeBodyCrossDown = isBlackK and open >= orangeLine and close < orangeLine
 
-// Compare today's fixed open with the prior day's confirmed line value.
-nextOpenAboveWhite = timeframe.isdaily and whiteBodyBreak[1] and open > whiteLine[1]
-nextOpenAboveOrange = timeframe.isdaily and orangeBodyBreak[1] and open > orangeLine[1]
-nextOpenAboveEither = nextOpenAboveWhite or nextOpenAboveOrange
+whiteBodyBreakSignal = whiteBodyCrossDown and (not confirmedBarsOnly or barstate.isconfirmed)
+orangeBodyBreakSignal = orangeBodyCrossDown and (not confirmedBarsOnly or barstate.isconfirmed)
 
-whiteBodyFullyAbove = math.min(open, close) > whiteLine
-orangeBodyFullyAbove = math.min(open, close) > orangeLine
-whiteRedBodyCross = isRedK and open <= whiteLine and close > whiteLine
-orangeRedBodyCross = isRedK and open <= orangeLine and close > orangeLine
+whiteOrOrangeBodyBreakSignal = whiteBodyBreakSignal or orangeBodyBreakSignal
 
-// A breakdown remains pending until the first later valid body reclaim.  This
-// signal is independent of that reclaim day's opening position.
-var bool whiteBreakPending = false
-var bool orangeBreakPending = false
-whiteFirstReclaim = timeframe.isdaily and whiteBreakPending and (whiteBodyFullyAbove or whiteRedBodyCross)
-orangeFirstReclaim = timeframe.isdaily and orangeBreakPending and (orangeBodyFullyAbove or orangeRedBodyCross)
-eitherFirstReclaim = whiteFirstReclaim or orangeFirstReclaim
+barsSinceWhiteBreak = ta.barssince(whiteBodyBreakSignal)
+barsSinceOrangeBreak = ta.barssince(orangeBodyBreakSignal)
 
-if whiteBodyBreak
-    whiteBreakPending := true
-else if whiteFirstReclaim and barstate.isconfirmed
-    whiteBreakPending := false
+whiteBreakInSelectedRange =
+     not na(barsSinceWhiteBreak) and
+     barsSinceWhiteBreak >= breakBarsAgoMin and
+     barsSinceWhiteBreak <= breakBarsAgoMax
 
-if orangeBodyBreak
-    orangeBreakPending := true
-else if orangeFirstReclaim and barstate.isconfirmed
-    orangeBreakPending := false
+orangeBreakInSelectedRange =
+     not na(barsSinceOrangeBreak) and
+     barsSinceOrangeBreak >= breakBarsAgoMin and
+     barsSinceOrangeBreak <= breakBarsAgoMax
 
-// Put the watchlist notification output first for Pine Screener.
-plot(nextOpenAboveEither ? 1 : 0, "隔日開盤站回白線或橙線", color = color.new(color.lime, 100), display = display.data_window)
-plot(whiteBodyBreak ? 1 : 0, "實體跌破白線", color = color.new(color.white, 100), display = display.data_window)
-plot(orangeBodyBreak ? 1 : 0, "實體跌破橙線", color = color.new(color.orange, 100), display = display.data_window)
-plot(whiteFirstReclaim ? 1 : 0, "白線站回第一根", color = color.new(color.red, 100), display = display.data_window)
-plot(orangeFirstReclaim ? 1 : 0, "橙線站回第一根", color = color.new(color.orange, 100), display = display.data_window)
-plot(eitherFirstReclaim ? 1 : 0, "白線或橙線站回第一根", color = color.new(color.purple, 100), display = display.data_window)
-plot(nextOpenAboveWhite ? 1 : 0, "隔日開盤在白線上", color = color.new(color.lime, 100), display = display.data_window)
-plot(nextOpenAboveOrange ? 1 : 0, "隔日開盤在橙線上", color = color.new(color.aqua, 100), display = display.data_window)
+whiteOrOrangeBreakInSelectedRange =
+     whiteBreakInSelectedRange or
+     orangeBreakInSelectedRange
 
-plot(showLines ? whiteLine : na, "白線", color = color.white, linewidth = 2)
-plot(showLines ? orangeLine : na, "橙線", color = color.orange, linewidth = 2)
+nearestBreakBarsAgo =
+     na(barsSinceWhiteBreak) ? barsSinceOrangeBreak :
+     na(barsSinceOrangeBreak) ? barsSinceWhiteBreak :
+     math.min(barsSinceWhiteBreak, barsSinceOrangeBreak)
 
-plotshape(whiteBodyBreak, title = "破白", style = shape.labeldown, location = location.abovebar, color = color.black, textcolor = color.white, text = "破白", size = size.tiny)
-plotshape(orangeBodyBreak, title = "破橙", style = shape.labeldown, location = location.abovebar, color = color.orange, textcolor = color.black, text = "破橙", size = size.tiny)
-plotshape(whiteFirstReclaim, title = "回白", style = shape.labelup, location = location.belowbar, color = color.red, textcolor = color.white, text = "回白", size = size.tiny)
-plotshape(orangeFirstReclaim, title = "回橙", style = shape.labelup, location = location.belowbar, color = color.orange, textcolor = color.black, text = "回橙", size = size.tiny)
+// ─────────────────────────────────────────────
+// 共用站回條件
+// ─────────────────────────────────────────────
+f_reclaimCondition(float targetLine) =>
+    bool bodyFullyAbove = math.min(open, close) > targetLine
+    bool redBodyCrossUp = isRedK and open <= targetLine and close > targetLine
+    switch reclaimMode
+        "收盤站回線上" => close > targetLine
+        "實體完全站上線上" => bodyFullyAbove
+        "紅K實體穿越線" => redBodyCrossUp
+        => bodyFullyAbove or redBodyCrossUp
 
-if enableImmediateAlert and nextOpenAboveEither and barstate.isnew
-    string reclaimed = nextOpenAboveWhite and nextOpenAboveOrange ? "白線及橙線" : nextOpenAboveWhite ? "白線" : "橙線"
-    alert(syminfo.ticker + "：昨日黑K實體跌破，今日開盤已重新站上" + reclaimed, alert.freq_once_per_bar)
+whiteReclaimCondition = f_reclaimCondition(chartWhite)
+orangeReclaimCondition = f_reclaimCondition(orangeLine)
 
-alertcondition(nextOpenAboveEither, "隔日開盤站回白線或橙線", "{{ticker}} 昨日黑K實體跌破白線或橙線，今日開盤已重新站上被跌破的同一條線")
-alertcondition(eitherFirstReclaim, "白線或橙線站回第一根", "{{ticker}} 先前黑K實體跌破白線或橙線，今日出現該次跌破後第一根有效站回K")
-alertcondition(whiteBodyBreak, "實體跌破白線", "{{ticker}} 黑K實體跌破白線")
-alertcondition(orangeBodyBreak, "實體跌破橙線", "{{ticker}} 黑K實體跌破橙線")
+// ─────────────────────────────────────────────
+// 開盤瞬間站回條件
+// ─────────────────────────────────────────────
+var bool pendingWhiteOpeningBreak = false
+var bool pendingOrangeOpeningBreak = false
+
+whiteOpenReclaimCondition =
+     enableWhiteOpenReclaim and
+     supportedReclaimTimeframe and
+     pendingWhiteOpeningBreak and
+     open > openingWhiteLine
+
+orangeOpenReclaimCondition =
+     enableOrangeOpenReclaim and
+     supportedReclaimTimeframe and
+     pendingOrangeOpeningBreak and
+     open > openingOrangeLine
+
+// ─────────────────────────────────────────────
+// 未收盤暫時訊號
+// ─────────────────────────────────────────────
+temporarySignalWindow =
+     showTemporaryIntrabarSignals and
+     confirmedBarsOnly and
+     supportedReclaimTimeframe and
+     not barstate.isconfirmed
+
+whiteBodyBreakPreview = temporarySignalWindow and whiteBodyCrossDown
+orangeBodyBreakPreview = temporarySignalWindow and orangeBodyCrossDown
+
+whiteReclaimPreview =
+     temporarySignalWindow and
+     pendingWhiteOpeningBreak and
+     whiteReclaimCondition and
+     not whiteOpenReclaimCondition
+
+orangeReclaimPreview =
+     temporarySignalWindow and
+     pendingOrangeOpeningBreak and
+     orangeReclaimCondition and
+     not orangeOpenReclaimCondition
+
+temporaryWhitePreviewSignal = whiteBodyBreakPreview or whiteReclaimPreview
+temporaryOrangePreviewSignal = orangeBodyBreakPreview or orangeReclaimPreview
+temporaryPreviewSignal = temporaryWhitePreviewSignal or temporaryOrangePreviewSignal
+
+// ─────────────────────────────────────────────
+// 白線跌破後等待站回
+// ─────────────────────────────────────────────
+var int activeWhiteBreakBar = na
+var bool waitingForWhiteReclaim = false
+bool whiteReclaimSignal = false
+
+if whiteBodyBreakSignal
+    activeWhiteBreakBar := bar_index
+    waitingForWhiteReclaim := true
+
+if waitingForWhiteReclaim and not na(activeWhiteBreakBar) and bar_index > activeWhiteBreakBar
+    int elapsedFromWhiteBreak = bar_index - activeWhiteBreakBar
+    bool whiteReclaimIsConfirmed =
+         (whiteReclaimCondition or whiteOpenReclaimCondition) and
+         (not confirmedBarsOnly or barstate.isconfirmed or whiteOpenReclaimCondition)
+
+    if elapsedFromWhiteBreak <= maxBarsToReclaim and whiteReclaimIsConfirmed
+        whiteReclaimSignal := true
+        waitingForWhiteReclaim := false
+    else if elapsedFromWhiteBreak >= maxBarsToReclaim
+        waitingForWhiteReclaim := false
+
+if whiteOpenReclaimCondition
+    whiteReclaimSignal := true
+
+if whiteBodyBreakSignal
+    pendingWhiteOpeningBreak := true
+else if pendingWhiteOpeningBreak and
+       barstate.isconfirmed and
+       (whiteOpenReclaimCondition or whiteReclaimCondition)
+    pendingWhiteOpeningBreak := false
+
+// ─────────────────────────────────────────────
+// 橙線跌破後等待站回
+// ─────────────────────────────────────────────
+var int activeOrangeBreakBar = na
+var bool waitingForOrangeReclaim = false
+bool orangeReclaimSignal = false
+
+if orangeBodyBreakSignal
+    activeOrangeBreakBar := bar_index
+    waitingForOrangeReclaim := true
+
+if waitingForOrangeReclaim and not na(activeOrangeBreakBar) and bar_index > activeOrangeBreakBar
+    int elapsedFromOrangeBreak = bar_index - activeOrangeBreakBar
+    bool orangeReclaimIsConfirmed =
+         (orangeReclaimCondition or orangeOpenReclaimCondition) and
+         (not confirmedBarsOnly or barstate.isconfirmed or orangeOpenReclaimCondition)
+
+    if elapsedFromOrangeBreak <= maxBarsToReclaim and orangeReclaimIsConfirmed
+        orangeReclaimSignal := true
+        waitingForOrangeReclaim := false
+    else if elapsedFromOrangeBreak >= maxBarsToReclaim
+        waitingForOrangeReclaim := false
+
+if orangeOpenReclaimCondition
+    orangeReclaimSignal := true
+
+if orangeBodyBreakSignal
+    pendingOrangeOpeningBreak := true
+else if pendingOrangeOpeningBreak and
+       barstate.isconfirmed and
+       (orangeOpenReclaimCondition or orangeReclaimCondition)
+    pendingOrangeOpeningBreak := false
+
+// ─────────────────────────────────────────────
+// 分類優先權：本根若重新實體跌破，不可同時是站回當根。
+// ─────────────────────────────────────────────
+if whiteBodyCrossDown
+    whiteReclaimSignal := false
+
+if orangeBodyCrossDown
+    orangeReclaimSignal := false
+
+whiteOrOrangeReclaimSignal = whiteReclaimSignal or orangeReclaimSignal
+
+// ─────────────────────────────────────────────
+// 下一根開盤立即通知條件
+// ─────────────────────────────────────────────
+nextOpenAboveWhiteSignal =
+     supportedReclaimTimeframe and
+     whiteBodyBreakSignal[1] and
+     open > openingWhiteLine
+
+nextOpenAboveOrangeSignal =
+     supportedReclaimTimeframe and
+     orangeBodyBreakSignal[1] and
+     open > openingOrangeLine
+
+nextOpenAboveEitherSignal = nextOpenAboveWhiteSignal or nextOpenAboveOrangeSignal
+openingReclaimAlertSignal = whiteOpenReclaimCondition or orangeOpenReclaimCondition
+
+// ─────────────────────────────────────────────
+// 站回後 N 根
+// ─────────────────────────────────────────────
+barsSinceWhiteReclaim = ta.barssince(whiteReclaimSignal)
+barsSinceOrangeReclaim = ta.barssince(orangeReclaimSignal)
+
+whiteMaintainsAbove = not requireAboveDuringRetention or close > chartWhite
+orangeMaintainsAbove = not requireAboveDuringRetention or close > orangeLine
+
+afterWhiteReclaimN =
+     not na(barsSinceWhiteReclaim) and
+     barsSinceWhiteReclaim > 0 and
+     barsSinceWhiteReclaim <= postReclaimBars and
+     whiteMaintainsAbove
+
+afterOrangeReclaimN =
+     not na(barsSinceOrangeReclaim) and
+     barsSinceOrangeReclaim > 0 and
+     barsSinceOrangeReclaim <= postReclaimBars and
+     orangeMaintainsAbove
+
+whiteReclaimOrRecent =
+     not na(barsSinceWhiteReclaim) and
+     barsSinceWhiteReclaim >= 0 and
+     barsSinceWhiteReclaim <= postReclaimBars and
+     whiteMaintainsAbove
+
+orangeReclaimOrRecent =
+     not na(barsSinceOrangeReclaim) and
+     barsSinceOrangeReclaim >= 0 and
+     barsSinceOrangeReclaim <= postReclaimBars and
+     orangeMaintainsAbove
+
+whiteOrOrangeReclaimOrRecent = whiteReclaimOrRecent or orangeReclaimOrRecent
+aboveWeeklyWhite = close > weeklyWhite
+
+// ─────────────────────────────────────────────
+// 主篩選條件
+// ─────────────────────────────────────────────
+rawSelectedSignal = switch scanStage
+    "實體跌破白線" => whiteBodyBreakSignal
+    "實體跌破橙色線" => orangeBodyBreakSignal
+    "實體跌破白線或橙色線" => whiteOrOrangeBodyBreakSignal
+
+    "未收盤暫時白線實體跌破" => whiteBodyBreakPreview
+    "未收盤暫時橙線實體跌破" => orangeBodyBreakPreview
+    "未收盤暫時白線實體站回" => whiteReclaimPreview
+    "未收盤暫時橙線實體站回" => orangeReclaimPreview
+    "未收盤暫時跌破或站回" => temporaryPreviewSignal
+
+    "白線實體跌破後指定根數" => whiteBreakInSelectedRange
+    "橙色線實體跌破後指定根數" => orangeBreakInSelectedRange
+    "白線或橙線實體跌破後指定根數" => whiteOrOrangeBreakInSelectedRange
+
+    "下一根開盤站回白線或橙線" => nextOpenAboveEitherSignal
+    "下一根開盤在白線上" => nextOpenAboveWhiteSignal
+    "下一根開盤在橙線上" => nextOpenAboveOrangeSignal
+
+    "白線站回當根" => whiteReclaimSignal
+    "橙線站回當根" => orangeReclaimSignal
+    "白線或橙線站回當根" => whiteOrOrangeReclaimSignal
+
+    "白線站回後 N 根" => afterWhiteReclaimN
+    "橙線站回後 N 根" => afterOrangeReclaimN
+
+    "白線站回當根＋後 N 根" => whiteReclaimOrRecent
+    "橙線站回當根＋後 N 根" => orangeReclaimOrRecent
+    => whiteOrOrangeReclaimOrRecent
+
+selectedSignal = rawSelectedSignal and (not requireWeeklyAbove or aboveWeeklyWhite)
+selectedSignalNew = selectedSignal and (na(selectedSignal[1]) or not selectedSignal[1])
+
+// ─────────────────────────────────────────────
+// Pine Screener 輸出
+// ─────────────────────────────────────────────
+plot(selectedSignal ? 1 : 0, "篩選命中", color = color.new(color.blue, 100), display = display.data_window)
+plot(nearestBreakBarsAgo, "距最近實體跌破根數", color = color.new(color.fuchsia, 100), display = display.data_window)
+plot(barsSinceWhiteBreak, "白線實體跌破距今根數", color = color.new(color.white, 100), display = display.data_window)
+plot(barsSinceOrangeBreak, "橙線實體跌破距今根數", color = color.new(color.orange, 100), display = display.data_window)
+plot(nextOpenAboveEitherSignal ? 1 : 0, "下一根開盤站回白線或橙線", color = color.new(color.lime, 100), display = display.data_window)
+plot(whiteBodyBreakSignal ? 1 : 0, "實體跌破白線", color = color.new(color.white, 100), display = display.data_window)
+plot(orangeBodyBreakSignal ? 1 : 0, "實體跌破橙色線", color = color.new(color.orange, 100), display = display.data_window)
+plot(whiteReclaimSignal ? 1 : 0, "白線站回當根", color = color.new(color.red, 100), display = display.data_window)
+plot(orangeReclaimSignal ? 1 : 0, "橙線站回當根", color = color.new(color.orange, 100), display = display.data_window)
+plot(whiteReclaimOrRecent ? 1 : 0, "白線站回當根及後N根", color = color.new(color.purple, 100), display = display.data_window)
+plot(orangeReclaimOrRecent ? 1 : 0, "橙線站回當根及後N根", color = color.new(color.yellow, 100), display = display.data_window)
+plot(aboveWeeklyWhite ? 1 : 0, "週白線以上", color = color.new(color.green, 100), display = display.data_window)
+plot(whiteOrOrangeBodyBreakSignal ? 1 : 0, "實體跌破白線或橙色線", color = color.new(color.yellow, 100), display = display.data_window)
+
+plot(nextOpenAboveWhiteSignal ? 1 : 0, "下一根開盤在白線上", display = display.data_window)
+plot(nextOpenAboveOrangeSignal ? 1 : 0, "下一根開盤在橙線上", display = display.data_window)
+plot(whiteOrOrangeReclaimSignal ? 1 : 0, "白線或橙線站回當根", display = display.data_window)
+plot(whiteOrOrangeReclaimOrRecent ? 1 : 0, "白線或橙線站回當根及後N根", display = display.data_window)
+
+plot(whiteBodyBreakPreview ? 1 : 0, "未收盤暫時實體跌破白線", display = display.data_window)
+plot(orangeBodyBreakPreview ? 1 : 0, "未收盤暫時實體跌破橙色線", display = display.data_window)
+plot(whiteReclaimPreview ? 1 : 0, "未收盤暫時實體站回白線", display = display.data_window)
+plot(orangeReclaimPreview ? 1 : 0, "未收盤暫時實體站回橙色線", display = display.data_window)
+plot(temporaryPreviewSignal ? 1 : 0, "未收盤暫時跌破或站回", display = display.data_window)
+
+// ─────────────────────────────────────────────
+// 圖表線條
+// ─────────────────────────────────────────────
+plot(showLines ? chartWhite : na, "本週期白線", color = color.white, linewidth = 2)
+plot(showLines ? orangeLine : na, "橙色線", color = color.orange, linewidth = 2)
+plot(showLines ? weeklyWhite : na, "週線白線", color = color.aqua, linewidth = 2)
+
+// ─────────────────────────────────────────────
+// 圖表標記
+// ─────────────────────────────────────────────
+plotshape(showMarks and whiteBodyBreakSignal, title = "白線實體跌破", style = shape.labeldown, location = location.abovebar, color = color.black, textcolor = color.white, text = "破白", size = size.tiny)
+plotshape(showMarks and orangeBodyBreakSignal, title = "橙線實體跌破", style = shape.labeldown, location = location.abovebar, color = color.orange, textcolor = color.black, text = "破橙", size = size.tiny)
+
+plotshape(showMarks and whiteReclaimSignal, title = "白線站回", style = shape.labelup, location = location.belowbar, color = color.red, textcolor = color.white, text = "回白", size = size.tiny)
+plotshape(showMarks and orangeReclaimSignal, title = "橙線站回", style = shape.labelup, location = location.belowbar, color = color.orange, textcolor = color.black, text = "回橙", size = size.tiny)
+
+plotshape(showMarks and whiteBodyBreakPreview, title = "白線暫時實體跌破", style = shape.labeldown, location = location.abovebar, color = color.gray, textcolor = color.white, text = "暫破白", size = size.tiny)
+plotshape(showMarks and orangeBodyBreakPreview, title = "橙線暫時實體跌破", style = shape.labeldown, location = location.abovebar, color = color.yellow, textcolor = color.black, text = "暫破橙", size = size.tiny)
+
+plotshape(showMarks and whiteReclaimPreview, title = "白線暫時實體站回", style = shape.labelup, location = location.belowbar, color = color.gray, textcolor = color.white, text = "暫回白", size = size.tiny)
+plotshape(showMarks and orangeReclaimPreview, title = "橙線暫時實體站回", style = shape.labelup, location = location.belowbar, color = color.yellow, textcolor = color.black, text = "暫回橙", size = size.tiny)
+
+plotshape(showMarks and nextOpenAboveWhiteSignal, title = "下一根開盤站上白線", style = shape.labelup, location = location.belowbar, color = color.lime, textcolor = color.black, text = "開白", size = size.tiny)
+plotshape(showMarks and nextOpenAboveOrangeSignal, title = "下一根開盤站上橙線", style = shape.labelup, location = location.belowbar, color = color.aqua, textcolor = color.black, text = "開橙", size = size.tiny)
+
+bgcolor(
+     shadeRecent and (afterWhiteReclaimN or afterOrangeReclaimN) ? color.new(color.orange, 88) : na,
+     title = "站回後N根區間")
+
+// ─────────────────────────────────────────────
+// 開盤即時動態通知
+// ─────────────────────────────────────────────
+if enableNextOpenAlert and openingReclaimAlertSignal and barstate.isnew
+    string openedAboveText =
+         whiteOpenReclaimCondition and orangeOpenReclaimCondition ? "白線及橙線" :
+         whiteOpenReclaimCondition ? "白線" : "橙線"
+
+    alert(
+         syminfo.ticker + "：先前黑K實體跌破，本根開盤已高於" + openedAboveText + "的開盤基準",
+         alert.freq_once_per_bar)
+
+// ─────────────────────────────────────────────
+// Watchlist 合併警報
+// ─────────────────────────────────────────────
+alertcondition(
+     nextOpenAboveEitherSignal,
+     "下一根開盤站回白線或橙線",
+     "{{ticker}} 前一根黑K實體跌破白線或橙線，本根開盤已高於該線的開盤基準")
+
+alertcondition(
+     selectedSignalNew,
+     "篩選命中新成立",
+     "{{ticker}} 新符合目前選擇的篩選條件")
+
+alertcondition(nextOpenAboveWhiteSignal, "下一根開盤在白線上", "{{ticker}} 前一根實體跌破白線，本根開盤已高於白線開盤基準")
+alertcondition(nextOpenAboveOrangeSignal, "下一根開盤在橙線上", "{{ticker}} 前一根實體跌破橙線，本根開盤已高於橙線開盤基準")
+alertcondition(whiteBodyBreakSignal, "實體跌破白線", "{{ticker}} 黑K實體跌破本週期白線")
+alertcondition(orangeBodyBreakSignal, "實體跌破橙色線", "{{ticker}} 黑K實體跌破本週期橙色線")
+alertcondition(whiteReclaimSignal, "白線站回當根", "{{ticker}} 在指定根數內站回本週期白線")
+alertcondition(orangeReclaimSignal, "橙線站回當根", "{{ticker}} 在指定根數內站回本週期橙色線")

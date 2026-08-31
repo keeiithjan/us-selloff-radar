@@ -6,8 +6,11 @@ const elements = {
   lineReclaimNotice: document.querySelector("#line-reclaim-notice"),
   openingReclaimCount: document.querySelector("#opening-reclaim-count"),
   firstReclaimCount: document.querySelector("#first-reclaim-count"),
+  openingReclaimTitle: document.querySelector("#opening-reclaim-title"),
+  firstReclaimTitle: document.querySelector("#first-reclaim-title"),
   openingReclaimSignals: document.querySelector("#opening-reclaim-signals"),
   firstReclaimSignals: document.querySelector("#first-reclaim-signals"),
+  lineReclaimTimeframeFilters: [...document.querySelectorAll("[data-reclaim-timeframe]")],
   lineReclaimLineFilters: [...document.querySelectorAll("[data-reclaim-line]")],
   lineReclaimMarketFilters: [...document.querySelectorAll("[data-reclaim-market]")],
   installApp: document.querySelector("#install-app"),
@@ -41,7 +44,7 @@ const elements = {
 };
 
 let sequentialPayload = null;
-const lineReclaimFilterState = { line: "all", market: "all" };
+const lineReclaimFilterState = { timeframe: "1d", line: "all", market: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -319,6 +322,11 @@ function filteredLineReclaims(signals, field) {
 }
 
 function updateLineReclaimFilterControls() {
+  for (const button of elements.lineReclaimTimeframeFilters) {
+    const active = button.dataset.reclaimTimeframe === lineReclaimFilterState.timeframe;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
   for (const button of elements.lineReclaimLineFilters) {
     const active = button.dataset.reclaimLine === lineReclaimFilterState.line;
     button.classList.toggle("is-active", active);
@@ -332,6 +340,7 @@ function updateLineReclaimFilterControls() {
 }
 
 function makeLineReclaimCard(signal, mode) {
+  const isWeekly = signal.timeframe_key === "1w";
   const field = mode === "opening" ? "opening_reclaim_lines" : "first_reclaim_lines";
   const lines = lineNames(signal, field);
   const card = document.createElement("article");
@@ -348,7 +357,9 @@ function makeLineReclaimCard(signal, mode) {
   const live = document.createElement("span");
   const confirmedFirstReclaim = mode === "first" && signal.first_reclaim_confirmed === true;
   live.className = `line-reclaim-session ${mode === "first" ? "closed" : signal.is_live_session ? "live" : "closed"}`;
-  live.textContent = confirmedFirstReclaim ? "CONFIRMED" : signal.is_live_session ? "LIVE" : "最新日K";
+  live.textContent = confirmedFirstReclaim
+    ? "CONFIRMED"
+    : signal.is_live_session ? "LIVE" : (isWeekly ? "最新週K" : "最新日K");
   top.append(identity, live);
 
   const badges = document.createElement("div");
@@ -364,7 +375,7 @@ function makeLineReclaimCard(signal, mode) {
   quote.className = "line-reclaim-quote";
   const price = document.createElement("strong");
   price.textContent = formatSignalPrice(signal);
-  const change = makeTodayChange(signal.change_pct, "日內");
+  const change = makeTodayChange(signal.change_pct, isWeekly ? "週內" : "日內");
   quote.append(price);
   if (change) quote.append(change);
 
@@ -372,8 +383,8 @@ function makeLineReclaimCard(signal, mode) {
   rule.className = "line-reclaim-rule";
   const broken = lineNames(signal, "broken_lines").join("＋") || "目標線";
   rule.textContent = mode === "opening"
-    ? `先前黑K實體跌破${broken}；今日開盤高於同一條線的開盤基準值。`
-    : `先前黑K實體跌破${broken}；今日為該次跌破後第一根有效站回K，與開盤位置無關。`;
+    ? `先前黑K實體跌破${broken}；${isWeekly ? "本週" : "今日"}開盤高於同一條線的開盤基準值。`
+    : `先前黑K實體跌破${broken}；${isWeekly ? "本週" : "今日"}為該次跌破後第一根有效站回K，與開盤位置無關。`;
 
   const values = document.createElement("p");
   values.className = "line-reclaim-values";
@@ -383,15 +394,16 @@ function makeLineReclaimCard(signal, mode) {
     return `${line} ${plainQuote(openingValue ?? currentValue)}`;
   }).join(" ／ ");
   const currentLines = lines.map((line) => `${line} ${plainQuote(line === "橙線" ? signal.current_orange : signal.current_white)}`).join(" ／ ");
+  const currentPeriod = isWeekly ? "本週" : "今日";
   values.textContent = mode === "opening"
-    ? `今日 O ${plainQuote(signal.open_price)}｜開盤基準 ${openingLines}`
-    : `今日 O ${plainQuote(signal.open_price)} ／ 現價 ${plainQuote(signal.last_price)}｜目前 ${currentLines}`;
+    ? `${currentPeriod} O ${plainQuote(signal.open_price)}｜開盤基準 ${openingLines}`
+    : `${currentPeriod} O ${plainQuote(signal.open_price)} ／ 現價 ${plainQuote(signal.last_price)}｜目前 ${currentLines}`;
 
   const footer = document.createElement("div");
   footer.className = "line-reclaim-card-footer";
   const time = document.createElement("span");
-  time.textContent = signal.bar_time_et || "最新日線";
-  footer.append(time, makeTradingViewLink(signal, "D"));
+  time.textContent = signal.bar_time_et || (isWeekly ? "最新週線" : "最新日線");
+  footer.append(time, makeTradingViewLink(signal, isWeekly ? "W" : "D"));
 
   card.append(top, badges, quote, rule, values, footer);
   return card;
@@ -402,9 +414,10 @@ function renderLineReclaimList(container, signals, mode) {
   if (signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "line-reclaim-empty";
+    const weekly = lineReclaimFilterState.timeframe === "1w";
     empty.textContent = mode === "opening"
-      ? "目前沒有開盤中的即時站回訊號；休市時不保留前一交易日的開盤事件。"
-      : "目前沒有位於跌破後第一根有效站回K的標的。";
+      ? `目前沒有開盤中的即時站回訊號；休市時不保留前一${weekly ? "週" : "交易日"}的開盤事件。`
+      : `目前沒有位於跌破後第一根有效站回${weekly ? "週K" : "日K"}的標的。`;
     container.replaceChildren(empty);
     return;
   }
@@ -429,10 +442,11 @@ function saveNotifiedLineAlertKeys(keys) {
 }
 
 async function showLineReclaimNotification(signal) {
+  const isWeekly = signal.timeframe_key === "1w";
   const lines = lineNames(signal, "opening_reclaim_lines").join("＋");
-  const title = `${signal.symbol} 開盤站回${lines}`;
-  const body = `先前黑K實體跌破${lines}，今日開盤已高於該線的開盤基準。`;
-  const url = tradingViewUrl(signal, "D");
+  const title = `${signal.symbol} ${isWeekly ? "週線" : "日線"}開盤站回${lines}`;
+  const body = `先前黑K實體跌破${lines}，${isWeekly ? "本週" : "今日"}開盤已高於該線的開盤基準。`;
+  const url = tradingViewUrl(signal, isWeekly ? "W" : "D");
   if ("serviceWorker" in navigator) {
     try {
       const registration = await navigator.serviceWorker.ready;
@@ -457,7 +471,7 @@ function notifyOpeningReclaims(signals) {
   for (const signal of signals) {
     // Keep latest-session cards visible after the close, but never replay an
     // old opening event as a fresh browser notification.
-    if (!signal.is_current_daily_bar) continue;
+    if (!(signal.is_current_period_bar ?? signal.is_current_daily_bar)) continue;
     const lines = lineNames(signal, "opening_reclaim_lines").sort().join("+");
     const key = `${signal.signal_id || signal.tradingview_symbol}:${lines}`;
     if (!lines || notified.has(key)) continue;
@@ -494,7 +508,9 @@ function renderDailyLineReclaims(payload) {
   if (!elements.openingReclaimSignals || !elements.firstReclaimSignals) return;
   const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
   const dailyFrame = frames.find((frame) => frame.key === "1d") || {};
-  const monitor = dailyFrame.daily_line_reclaims || {};
+  const dailyMonitor = dailyFrame.daily_line_reclaims || {};
+  const weeklyMonitor = payload?.weekly_reclaim?.line_reclaims || {};
+  const monitor = lineReclaimFilterState.timeframe === "1w" ? weeklyMonitor : dailyMonitor;
   const signals = Array.isArray(monitor.signals) ? monitor.signals : [];
   // The left panel is an opening-time live feed, not a history list.  Once a
   // symbol's market closes (or before its next session opens), its old opening
@@ -502,7 +518,7 @@ function renderDailyLineReclaims(payload) {
   // right so off-hours review still has useful candidates.
   const liveOpeningSignals = signals.filter((signal) => (
     lineNames(signal, "opening_reclaim_lines").length > 0
-    && signal.is_current_daily_bar
+    && (signal.is_current_period_bar ?? signal.is_current_daily_bar)
     && signal.is_live_session
   ));
   const latestFirstSignals = signals.filter((signal) => (
@@ -515,16 +531,26 @@ function renderDailyLineReclaims(payload) {
   renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
   elements.openingReclaimCount.textContent = String(openingSignals.length);
   elements.firstReclaimCount.textContent = String(firstSignals.length);
+  const weekly = lineReclaimFilterState.timeframe === "1w";
+  elements.openingReclaimTitle.textContent = weekly ? "下一週開盤立即站回" : "隔日開盤立即站回";
+  elements.firstReclaimTitle.textContent = `已確認${weekly ? "週線" : "日線"}站回第一根`;
   elements.lineReclaimUpdated.textContent = payload?.updated_at_utc
     ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
-    : "等待首次日線掃描";
+    : `等待首次${weekly ? "週線" : "日線"}掃描`;
   const markets = Object.entries(monitor.scanned_by_market || {})
     .map(([market, count]) => `${displayMarket(market)} ${Number(count).toLocaleString("zh-TW")} 檔`)
     .join("、");
   elements.lineReclaimScanCount.textContent = monitor.scanned_symbols
-    ? `本輪日線掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
-    : "等待新版日線站回資料";
-  notifyOpeningReclaims(liveOpeningSignals);
+    ? `本輪${weekly ? "週線" : "日線"}掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
+    : `等待新版${weekly ? "週線" : "日線"}站回資料`;
+  const allLiveOpeningSignals = [dailyMonitor, weeklyMonitor].flatMap((item) => (
+    Array.isArray(item?.signals) ? item.signals : []
+  )).filter((signal) => (
+    lineNames(signal, "opening_reclaim_lines").length > 0
+    && (signal.is_current_period_bar ?? signal.is_current_daily_bar)
+    && signal.is_live_session
+  ));
+  notifyOpeningReclaims(allLiveOpeningSignals);
   updateLineAlertControls();
   updateLineReclaimFilterControls();
 }
@@ -1934,6 +1960,12 @@ elements.sequentialMomentum.addEventListener("change", () => {
 if (elements.weeklyReclaimFilter) {
   elements.weeklyReclaimFilter.addEventListener("change", () => {
     if (sequentialPayload) renderWeeklyReclaims(sequentialPayload);
+  });
+}
+for (const button of elements.lineReclaimTimeframeFilters) {
+  button.addEventListener("click", () => {
+    lineReclaimFilterState.timeframe = button.dataset.reclaimTimeframe || "1d";
+    if (sequentialPayload) renderDailyLineReclaims(sequentialPayload);
   });
 }
 for (const button of elements.lineReclaimLineFilters) {
