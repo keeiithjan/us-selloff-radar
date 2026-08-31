@@ -371,15 +371,19 @@ function makeLineReclaimCard(signal, mode) {
   rule.className = "line-reclaim-rule";
   const broken = lineNames(signal, "broken_lines").join("＋") || "目標線";
   rule.textContent = mode === "opening"
-    ? `前一日黑K實體跌破${broken}；今日開盤重新站上同一條線。`
+    ? `先前黑K實體跌破${broken}；今日開盤高於同一條線的開盤基準值。`
     : `先前黑K實體跌破${broken}；今日為該次跌破後第一根有效站回K，與開盤位置無關。`;
 
   const values = document.createElement("p");
   values.className = "line-reclaim-values";
-  const previousLines = lines.map((line) => `${line} ${plainQuote(line === "橙線" ? signal.previous_orange : signal.previous_white)}`).join(" ／ ");
+  const openingLines = lines.map((line) => {
+    const openingValue = line === "橙線" ? signal.opening_orange : signal.opening_white;
+    const currentValue = line === "橙線" ? signal.current_orange : signal.current_white;
+    return `${line} ${plainQuote(openingValue ?? currentValue)}`;
+  }).join(" ／ ");
   const currentLines = lines.map((line) => `${line} ${plainQuote(line === "橙線" ? signal.current_orange : signal.current_white)}`).join(" ／ ");
   values.textContent = mode === "opening"
-    ? `今日 O ${plainQuote(signal.open_price)}｜昨日基準 ${previousLines}`
+    ? `今日 O ${plainQuote(signal.open_price)}｜開盤基準 ${openingLines}`
     : `今日 O ${plainQuote(signal.open_price)} ／ 現價 ${plainQuote(signal.last_price)}｜目前 ${currentLines}`;
 
   const footer = document.createElement("div");
@@ -426,7 +430,7 @@ function saveNotifiedLineAlertKeys(keys) {
 async function showLineReclaimNotification(signal) {
   const lines = lineNames(signal, "opening_reclaim_lines").join("＋");
   const title = `${signal.symbol} 開盤站回${lines}`;
-  const body = `昨日黑K實體跌破${lines}，今日開盤已重新站上。`;
+  const body = `先前黑K實體跌破${lines}，今日開盤已高於該線的開盤基準。`;
   const url = tradingViewUrl(signal, "D");
   if ("serviceWorker" in navigator) {
     try {

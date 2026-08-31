@@ -890,8 +890,9 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
 def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     """Return the current daily white/orange breakdown-reclaim event.
 
-    Opening reclaim is a strict next-session event: the previous completed
-    candle must be black and its real body must cross below the selected line.
+    Opening reclaim requires an earlier black real-body break of the selected
+    line and an opening price above that line's value at the current bar's
+    open.  This baseline is held fixed even if the live bar later moves it.
     First-body reclaim is independent of the open: a breakdown stays pending
     until the first later candle whose body validly reclaims that same line.
     The newest daily candle may be live so either event can surface promptly.
@@ -934,6 +935,23 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     previous_orange = float(previous["orange_upper"])
     current_white = float(current["white_kernel"])
     current_orange = float(current["orange_upper"])
+
+    # The high, low, and close of a live daily bar may change after the open.
+    # Rebuild its indicator values as they were on the first quote, when all
+    # four OHLC values equal the open.  Opening-reclaim eligibility must not
+    # be created or removed later solely because an intraday line moved.
+    opening_frame = clean.copy()
+    for column in ("High", "Low", "Close"):
+        opening_frame.iloc[-1, opening_frame.columns.get_loc(column)] = current_open
+    opening_features = ai_momentum_features(opening_frame)
+    if len(opening_features) < 1:
+        return None
+    opening = opening_features.iloc[-1]
+    opening_values = (opening["white_kernel"], opening["orange_upper"])
+    if not all(np.isfinite(float(value)) for value in opening_values):
+        return None
+    opening_white = float(opening["white_kernel"])
+    opening_orange = float(opening["orange_upper"])
 
     def body_breaks(open_value: float, close_value: float, target: float) -> bool:
         return close_value < open_value and open_value >= target and close_value < target
@@ -1003,9 +1021,9 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
 
     opening_lines: list[str] = []
     first_reclaim_lines: list[str] = []
-    if white_opening_break_position is not None and current_open > previous_white:
+    if white_opening_break_position is not None and current_open > opening_white:
         opening_lines.append("白線")
-    if orange_opening_break_position is not None and current_open > previous_orange:
+    if orange_opening_break_position is not None and current_open > opening_orange:
         opening_lines.append("橙線")
     if white_first_break_position is not None:
         first_reclaim_lines.append("白線")
@@ -1045,6 +1063,8 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
         "previous_close": round(previous_close, 8),
         "previous_white": round(previous_white, 8),
         "previous_orange": round(previous_orange, 8),
+        "opening_white": round(opening_white, 8),
+        "opening_orange": round(opening_orange, 8),
         "current_white": round(current_white, 8),
         "current_orange": round(current_orange, 8),
         "bar_index_value": clean.index[-1],

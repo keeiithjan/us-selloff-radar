@@ -1,6 +1,7 @@
 import unittest
 import sys
 import types
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -64,6 +65,36 @@ class DailyLineReclaimTests(unittest.TestCase):
         self.assertIn("橙線", event["broken_lines"])
         self.assertIn("橙線", event["opening_reclaim_lines"])
         self.assertIn("橙線", event["first_reclaim_lines"])
+
+    def test_opening_reclaim_uses_current_bar_orange_line(self) -> None:
+        frame = base_frame()
+        # The previous black candle genuinely breaks the orange line at 100.
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 104.0
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 99.0
+        # Today's open is above yesterday's orange (100).  The current
+        # intraday line later moves lower, but its line value at the opening
+        # was 105.  This must not become an opening reclaim retroactively.
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 101.0
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 98.0
+
+        features = pd.DataFrame(
+            {
+                "white_kernel": 95.0,
+                "orange_upper": 100.0,
+            },
+            index=frame.index,
+        )
+        features.iloc[-1, features.columns.get_loc("orange_upper")] = 99.0
+        opening_features = features.copy()
+        opening_features.iloc[-1, opening_features.columns.get_loc("orange_upper")] = 105.0
+
+        with patch(
+            "sequential.ai_momentum_features",
+            side_effect=[features, opening_features],
+        ):
+            event = daily_line_reclaim_event(frame)
+
+        self.assertIsNone(event)
 
     def test_cash_index_without_volume_is_still_scanned(self) -> None:
         frame = base_frame().drop(columns="Volume")
