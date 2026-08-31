@@ -132,6 +132,22 @@ class DailyLineReclaimTests(unittest.TestCase):
         self.assertEqual(event["first_reclaim_lines"], ["白線"])
         self.assertEqual(event["first_reclaim_break_bars_ago"], {"白線": 2})
 
+    def test_live_current_body_reclaim_is_not_confirmed(self) -> None:
+        frame = base_frame()
+        # A confirmed white-line body break remains pending from two sessions ago.
+        frame.iloc[-3, frame.columns.get_loc("Open")] = 100.6
+        frame.iloc[-3, frame.columns.get_loc("Close")] = 99.0
+        frame.iloc[-2, frame.columns.get_loc("Open")] = 99.3
+        frame.iloc[-2, frame.columns.get_loc("Close")] = 99.1
+        # The current daily bar is temporarily a valid reclaim, but its market
+        # is still open.  The right-side confirmed list must not receive it.
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 99.4
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.8
+
+        event = daily_line_reclaim_event(frame, allow_current_body_reclaim=False)
+
+        self.assertIsNone(event)
+
     def test_opening_reclaim_keeps_an_earlier_unreclaimed_body_break(self) -> None:
         frame = base_frame()
         # A white-line body break occurs two completed sessions ago.

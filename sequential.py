@@ -887,7 +887,11 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
+def daily_line_reclaim_event(
+    frame: pd.DataFrame,
+    *,
+    allow_current_body_reclaim: bool = True,
+) -> dict[str, object] | None:
     """Return the current daily white/orange breakdown-reclaim event.
 
     Opening reclaim requires an earlier black real-body break of the selected
@@ -895,7 +899,7 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
     open.  This baseline is held fixed even if the live bar later moves it.
     First-body reclaim is independent of the open: a breakdown stays pending
     until the first later candle whose body validly reclaims that same line.
-    The newest daily candle may be live so either event can surface promptly.
+    A caller can withhold a live current daily bar from that confirmed event.
     """
     required = {"Open", "High", "Low", "Close"}
     if not required.issubset(frame.columns):
@@ -995,6 +999,8 @@ def daily_line_reclaim_event(frame: pd.DataFrame) -> dict[str, object] | None:
         pending_position: int | None = None
         last_position = len(clean) - 1
         for position in range(len(clean)):
+            if position == last_position and not allow_current_body_reclaim:
+                continue
             line_value = features[line_column].iloc[position]
             open_value = clean["Open"].iloc[position]
             close_value = clean["Close"].iloc[position]
@@ -1738,10 +1744,15 @@ def collect_signals(
             daily_line_scanned_by_market[instrument.market] = (
                 daily_line_scanned_by_market.get(instrument.market, 0) + 1
             )
-            live_event = daily_line_reclaim_event(raw)
+            event_index = raw.index[-1]
+            current_daily_bar = is_current_daily_bar(event_index, instrument.session, now)
+            market_live = current_daily_bar and session_is_live(instrument.session, now)
+            live_event = daily_line_reclaim_event(
+                raw,
+                allow_current_body_reclaim=not market_live,
+            )
             if live_event is not None:
                 event_index = live_event.pop("bar_index_value")
-                current_daily_bar = is_current_daily_bar(event_index, instrument.session, now)
                 product_category = product_category_for(instrument, public_profile_cache)
                 tradingview_symbol = tradingview_symbol_for(instrument)
                 bar_date = pd.Timestamp(event_index)
@@ -1760,7 +1771,10 @@ def collect_signals(
                         "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
                         "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
                         "is_current_daily_bar": current_daily_bar,
-                        "is_live_session": current_daily_bar and session_is_live(instrument.session, now),
+                        "is_live_session": market_live,
+                        "first_reclaim_confirmed": (
+                            bool(live_event.get("first_reclaim_lines")) and not market_live
+                        ),
                         **live_event,
                     }
                 )

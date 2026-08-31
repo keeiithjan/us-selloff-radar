@@ -5,11 +5,10 @@ on:
   push:
     branches: [main]
   schedule:
-    # Scan at minute 1 so Taiwan's 09:00 open and the US 09:30 open enter the
-    # next deployment immediately after the first available quote.  The
-    # ten-minute cadence keeps the opening-reclaim panel current throughout
-    # the live session without overlapping the normal multi-market scan.
-    - cron: "1,11,21,31,41,51 * * * 1-5"
+    # GitHub's five-minute minimum cadence keeps Taiwan's 09:00 and the US
+    # 09:30 opening reclaims close to the first available daily quote.  The
+    # browser polls the published snapshot every 15 seconds after deployment.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * 1-5"
 
 env:
   RECENT_SIGNAL_BARS: "8"

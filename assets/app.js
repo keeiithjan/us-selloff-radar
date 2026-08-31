@@ -346,8 +346,9 @@ function makeLineReclaimCard(signal, mode) {
   market.textContent = `${displayMarket(signal.market)} · ${industryText(signal)}`;
   identity.append(ticker, market);
   const live = document.createElement("span");
-  live.className = `line-reclaim-session ${signal.is_live_session ? "live" : "closed"}`;
-  live.textContent = signal.is_live_session ? "LIVE" : "最新日K";
+  const confirmedFirstReclaim = mode === "first" && signal.first_reclaim_confirmed === true;
+  live.className = `line-reclaim-session ${mode === "first" ? "closed" : signal.is_live_session ? "live" : "closed"}`;
+  live.textContent = confirmedFirstReclaim ? "CONFIRMED" : signal.is_live_session ? "LIVE" : "最新日K";
   top.append(identity, live);
 
   const badges = document.createElement("div");
@@ -504,7 +505,10 @@ function renderDailyLineReclaims(payload) {
     && signal.is_current_daily_bar
     && signal.is_live_session
   ));
-  const latestFirstSignals = signals.filter((signal) => lineNames(signal, "first_reclaim_lines").length > 0);
+  const latestFirstSignals = signals.filter((signal) => (
+    lineNames(signal, "first_reclaim_lines").length > 0
+    && signal.first_reclaim_confirmed === true
+  ));
   const openingSignals = filteredLineReclaims(liveOpeningSignals, "opening_reclaim_lines");
   const firstSignals = filteredLineReclaims(latestFirstSignals, "first_reclaim_lines");
   renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
