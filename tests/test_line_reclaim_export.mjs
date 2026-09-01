@@ -147,9 +147,10 @@ context.testCardSignal = {
   first_reclaim_lines: ["白線"],
   broken_lines: ["白線"],
   first_reclaim_confirmed: true,
+  first_shown_at_utc: "2026-09-01T17:54:56Z",
 };
 const card = vm.runInContext(
-  'makeLineReclaimCard(testCardSignal, "first", "2026-09-01T17:54:56Z")',
+  'makeLineReclaimCard(testCardSignal, "first")',
   context,
 );
 function cardText(node) {
@@ -157,6 +158,6 @@ function cardText(node) {
   return [node.textContent, ...(node.children || []).map(cardText)].filter(Boolean).join(" ");
 }
 assert.match(cardText(card), /訊號 K：2026-08-31 日線/);
-assert.match(cardText(card), /網站更新：2026\/09\/02\s+01:54:56/);
+assert.match(cardText(card), /首次顯示：2026\/09\/02\s+01:54:56/);
 
 console.log("line reclaim export tests passed");

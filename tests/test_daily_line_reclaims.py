@@ -15,6 +15,7 @@ from sequential import (
     TIMEFRAMES,
     US_SESSION,
     WEEKLY_RECLAIM_TIMEFRAME,
+    carry_forward_line_reclaim_first_shown,
     daily_line_reclaim_event,
     is_current_period_bar,
     period_line_reclaim_events,
@@ -37,6 +38,56 @@ def base_frame() -> pd.DataFrame:
 
 
 class DailyLineReclaimTests(unittest.TestCase):
+    def test_first_shown_time_is_carried_forward_by_signal_id(self) -> None:
+        prior_time = "2026-09-01T13:30:01+00:00"
+        current_time = "2026-09-02T13:30:02+00:00"
+        previous = {
+            "timeframes": [{
+                "key": "1d",
+                "daily_line_reclaims": {
+                    "signals": [{
+                        "signal_id": "1d:NASDAQ:AAA:2026-09-01",
+                        "first_shown_at_utc": prior_time,
+                    }],
+                },
+            }],
+            "weekly_reclaim": {"line_reclaims": {"signals": []}},
+        }
+        payload = {
+            "timeframes": [{
+                "key": "1d",
+                "daily_line_reclaims": {
+                    "signals": [
+                        {
+                            "signal_id": "1d:NASDAQ:AAA:2026-09-01",
+                            "first_reclaim_lines": ["白線"],
+                            "first_reclaim_confirmed": True,
+                        },
+                        {
+                            "signal_id": "1d:NYSE:BBB:2026-09-02",
+                            "opening_reclaim_lines": ["橙線"],
+                            "is_current_period_bar": True,
+                            "is_live_session": True,
+                        },
+                        {
+                            "signal_id": "1d:NYSE:HIDDEN:2026-09-02",
+                            "opening_reclaim_lines": ["白線"],
+                            "is_current_period_bar": False,
+                            "is_live_session": False,
+                        },
+                    ],
+                },
+            }],
+            "weekly_reclaim": {"line_reclaims": {"signals": []}},
+        }
+
+        carry_forward_line_reclaim_first_shown(payload, previous, current_time)
+
+        signals = payload["timeframes"][0]["daily_line_reclaims"]["signals"]
+        self.assertEqual(signals[0]["first_shown_at_utc"], prior_time)
+        self.assertEqual(signals[1]["first_shown_at_utc"], current_time)
+        self.assertNotIn("first_shown_at_utc", signals[2])
+
     def test_requires_previous_real_body_break(self) -> None:
         frame = base_frame()
         frame.iloc[-1, frame.columns.get_loc("Open")] = 105.0

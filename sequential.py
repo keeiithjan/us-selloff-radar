@@ -33,6 +33,10 @@ from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_sessi
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_FILE = ROOT / "data" / "sequential.json"
+DEPLOYED_SEQUENTIAL_URL = os.getenv(
+    "DEPLOYED_SEQUENTIAL_URL",
+    "https://keeiithjan.github.io/us-selloff-radar/data/sequential.json",
+)
 TRADINGVIEW_EXPORT_FILE = ROOT / "data" / "KJ-Radar-TradingView.TXT"
 WEEKLY_RECLAIM_EXPORT_FILE = ROOT / "data" / "KJ-Radar-Weekly-White-Reclaim.TXT"
 TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TXT"
@@ -2282,6 +2286,92 @@ def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
     ]
 
 
+def line_reclaim_signal_lists(payload: dict[str, object]) -> list[list[dict[str, object]]]:
+    """Return the daily and weekly line-reclaim lists contained in a payload."""
+    lists: list[list[dict[str, object]]] = []
+    frames = payload.get("timeframes", [])
+    for frame in frames if isinstance(frames, list) else []:
+        if not isinstance(frame, dict) or frame.get("key") != "1d":
+            continue
+        monitor = frame.get("daily_line_reclaims", {})
+        signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
+        if isinstance(signals, list):
+            lists.append([signal for signal in signals if isinstance(signal, dict)])
+    weekly = payload.get("weekly_reclaim", {})
+    monitor = weekly.get("line_reclaims", {}) if isinstance(weekly, dict) else {}
+    signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
+    if isinstance(signals, list):
+        lists.append([signal for signal in signals if isinstance(signal, dict)])
+    return lists
+
+
+def line_reclaim_is_visible(signal: dict[str, object]) -> bool:
+    """Match the front-end rules that cause a reclaim card to be displayed."""
+    opening_lines = signal.get("opening_reclaim_lines", [])
+    first_lines = signal.get("first_reclaim_lines", [])
+    current_period = signal.get(
+        "is_current_period_bar",
+        signal.get("is_current_daily_bar", False),
+    )
+    opening_visible = bool(
+        isinstance(opening_lines, list)
+        and opening_lines
+        and current_period
+        and signal.get("is_live_session")
+    )
+    first_visible = bool(
+        isinstance(first_lines, list)
+        and first_lines
+        and signal.get("first_reclaim_confirmed") is True
+    )
+    return opening_visible or first_visible
+
+
+def carry_forward_line_reclaim_first_shown(
+    payload: dict[str, object],
+    previous_payload: dict[str, object] | None,
+    generated_at_utc: str,
+) -> None:
+    """Persist the first website appearance time for each visible reclaim card."""
+    previous_first_shown: dict[str, str] = {}
+    if isinstance(previous_payload, dict):
+        for signals in line_reclaim_signal_lists(previous_payload):
+            for signal in signals:
+                signal_id = str(signal.get("signal_id") or "").strip()
+                first_shown = str(signal.get("first_shown_at_utc") or "").strip()
+                if signal_id and first_shown:
+                    previous_first_shown[signal_id] = first_shown
+
+    for signals in line_reclaim_signal_lists(payload):
+        for signal in signals:
+            signal_id = str(signal.get("signal_id") or "").strip()
+            if not signal_id:
+                continue
+            prior = previous_first_shown.get(signal_id)
+            if prior:
+                signal["first_shown_at_utc"] = prior
+            elif line_reclaim_is_visible(signal):
+                signal["first_shown_at_utc"] = generated_at_utc
+
+
+def load_deployed_payload() -> dict[str, object] | None:
+    """Read the last published snapshot so first-show times survive Actions runs."""
+    if not DEPLOYED_SEQUENTIAL_URL:
+        return None
+    separator = "&" if "?" in DEPLOYED_SEQUENTIAL_URL else "?"
+    request = Request(
+        f"{DEPLOYED_SEQUENTIAL_URL}{separator}first-shown={datetime.now(timezone.utc).timestamp()}",
+        headers={"User-Agent": "KJ-Radar-First-Shown/1.0"},
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+        return payload if isinstance(payload, dict) else None
+    except Exception as error:  # noqa: BLE001 - a fresh scan should still deploy.
+        logging.warning("Could not load prior deployed reclaim timestamps: %s", error)
+        return None
+
+
 def write_payload(
     frames: Iterable[dict[str, object]],
     weekly_reclaim: dict[str, object],
@@ -2299,14 +2389,20 @@ def write_payload(
     if errors:
         source += " 本次部分來源未更新：" + "；".join(errors)
     frame_list = list(frames)
+    generated_at_utc = datetime.now(timezone.utc).isoformat()
     payload = {
-        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "updated_at_utc": generated_at_utc,
         "market_status": "open" if is_regular_session(now) else "closed",
         "scan_errors": errors,
         "source": source,
         "timeframes": frame_list,
         "weekly_reclaim": weekly_reclaim,
     }
+    carry_forward_line_reclaim_first_shown(
+        payload,
+        load_deployed_payload(),
+        generated_at_utc,
+    )
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
     OUTPUT_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     # The static file is a ready-to-upload TradingView watchlist for the

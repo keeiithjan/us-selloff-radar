@@ -430,7 +430,7 @@ function updateLineReclaimFilterControls() {
   }
 }
 
-function makeLineReclaimCard(signal, mode, websiteUpdatedAt) {
+function makeLineReclaimCard(signal, mode) {
   const isWeekly = signal.timeframe_key === "1w";
   const field = mode === "opening" ? "opening_reclaim_lines" : "first_reclaim_lines";
   const lines = lineNames(signal, field);
@@ -497,8 +497,8 @@ function makeLineReclaimCard(signal, mode, websiteUpdatedAt) {
   const time = document.createElement("span");
   time.textContent = `訊號 K：${signal.bar_time_et || (isWeekly ? "最新週線" : "最新日線")}`;
   const updated = document.createElement("span");
-  updated.className = "line-reclaim-site-updated";
-  updated.textContent = `網站更新：${formatTaipeiPrecise(websiteUpdatedAt)}`;
+  updated.className = "line-reclaim-first-shown";
+  updated.textContent = `首次顯示：${formatTaipeiPrecise(signal.first_shown_at_utc)}`;
   timestamps.append(time, updated);
   footer.append(timestamps, makeTradingViewLink(signal, isWeekly ? "W" : "D"));
 
@@ -506,7 +506,7 @@ function makeLineReclaimCard(signal, mode, websiteUpdatedAt) {
   return card;
 }
 
-function renderLineReclaimList(container, signals, mode, websiteUpdatedAt) {
+function renderLineReclaimList(container, signals, mode) {
   if (!container) return;
   if (signals.length === 0) {
     const empty = document.createElement("p");
@@ -518,7 +518,7 @@ function renderLineReclaimList(container, signals, mode, websiteUpdatedAt) {
     container.replaceChildren(empty);
     return;
   }
-  container.replaceChildren(...signals.map((signal) => makeLineReclaimCard(signal, mode, websiteUpdatedAt)));
+  container.replaceChildren(...signals.map((signal) => makeLineReclaimCard(signal, mode)));
 }
 
 function notifiedLineAlertKeys() {
@@ -624,8 +624,8 @@ function renderDailyLineReclaims(payload) {
   ));
   const openingSignals = filteredLineReclaims(liveOpeningSignals, "opening_reclaim_lines");
   const firstSignals = filteredLineReclaims(latestFirstSignals, "first_reclaim_lines");
-  renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening", payload?.updated_at_utc);
-  renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first", payload?.updated_at_utc);
+  renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
+  renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
   elements.openingReclaimCount.textContent = String(openingSignals.length);
   elements.firstReclaimCount.textContent = String(firstSignals.length);
   const weekly = lineReclaimFilterState.timeframe === "1w";
