@@ -13,6 +13,9 @@ const elements = {
   lineReclaimTimeframeFilters: [...document.querySelectorAll("[data-reclaim-timeframe]")],
   lineReclaimLineFilters: [...document.querySelectorAll("[data-reclaim-line]")],
   lineReclaimMarketFilters: [...document.querySelectorAll("[data-reclaim-market]")],
+  downloadDailyLineReclaims: document.querySelector("#download-daily-line-reclaims"),
+  downloadWeeklyLineReclaims: document.querySelector("#download-weekly-line-reclaims"),
+  lineReclaimExportNote: document.querySelector("#line-reclaim-export-note"),
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
   systemStatus: document.querySelector("#system-status"),
@@ -321,6 +324,80 @@ function filteredLineReclaims(signals, field) {
   });
 }
 
+function lineReclaimMonitor(payload, timeframe) {
+  if (timeframe === "1w") return payload?.weekly_reclaim?.line_reclaims || {};
+  const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
+  return frames.find((frame) => frame.key === "1d")?.daily_line_reclaims || {};
+}
+
+function exportableLineReclaims(payload, timeframe) {
+  const signals = Array.isArray(lineReclaimMonitor(payload, timeframe).signals)
+    ? lineReclaimMonitor(payload, timeframe).signals
+    : [];
+  const openingSignals = filteredLineReclaims(signals.filter((signal) => (
+    lineNames(signal, "opening_reclaim_lines").length > 0
+    && (signal.is_current_period_bar ?? signal.is_current_daily_bar)
+    && signal.is_live_session
+  )), "opening_reclaim_lines");
+  const firstSignals = filteredLineReclaims(signals.filter((signal) => (
+    lineNames(signal, "first_reclaim_lines").length > 0
+    && signal.first_reclaim_confirmed === true
+  )), "first_reclaim_lines");
+  const unique = new Map();
+  for (const signal of [...openingSignals, ...firstSignals]) {
+    const symbol = tradingViewImportSymbol(signal);
+    if (!symbol || unique.has(symbol)) continue;
+    unique.set(symbol, signal);
+  }
+  return [...unique.values()].sort(compareExportSignals);
+}
+
+function lineReclaimFilterDescription() {
+  const market = { all: "全部市場", taiwan: "台股", us: "美股", other: "其他" }[lineReclaimFilterState.market] || "全部市場";
+  const line = lineReclaimFilterState.line === "all" ? "白線＋橙線" : lineReclaimFilterState.line;
+  return `${market}／${line}`;
+}
+
+function updateLineReclaimExportControls(payload) {
+  const dailyCount = exportableLineReclaims(payload, "1d").length;
+  const weeklyCount = exportableLineReclaims(payload, "1w").length;
+  if (elements.downloadDailyLineReclaims) {
+    elements.downloadDailyLineReclaims.textContent = `一鍵輸出日線清單（${dailyCount}）`;
+    elements.downloadDailyLineReclaims.disabled = dailyCount === 0;
+  }
+  if (elements.downloadWeeklyLineReclaims) {
+    elements.downloadWeeklyLineReclaims.textContent = `一鍵輸出週線清單（${weeklyCount}）`;
+    elements.downloadWeeklyLineReclaims.disabled = weeklyCount === 0;
+  }
+  if (elements.lineReclaimExportNote) {
+    elements.lineReclaimExportNote.textContent = `目前篩選：${lineReclaimFilterDescription()}｜日線 ${dailyCount} 檔、週線 ${weeklyCount} 檔；合併兩側訊號並自動去重。`;
+  }
+}
+
+function downloadLineReclaimTradingViewList(timeframe) {
+  const signals = exportableLineReclaims(sequentialPayload, timeframe);
+  const periodLabel = timeframe === "1w" ? "週線" : "日線";
+  if (signals.length === 0) {
+    if (elements.lineReclaimExportNote) {
+      elements.lineReclaimExportNote.textContent = `目前${lineReclaimFilterDescription()}沒有可匯出的${periodLabel}站回標的。`;
+    }
+    return;
+  }
+  const symbols = signals.map(tradingViewImportSymbol);
+  const blob = new Blob([`${symbols.join("\n")}\n`], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `KJ-Radar-${timeframe === "1w" ? "Weekly" : "Daily"}-Line-Reclaims-${new Date().toISOString().slice(0, 10)}.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  if (elements.lineReclaimExportNote) {
+    elements.lineReclaimExportNote.textContent = `已輸出 ${symbols.length} 個${periodLabel}站回代碼（${lineReclaimFilterDescription()}），可直接匯入 TradingView。`;
+  }
+}
+
 function updateLineReclaimFilterControls() {
   for (const button of elements.lineReclaimTimeframeFilters) {
     const active = button.dataset.reclaimTimeframe === lineReclaimFilterState.timeframe;
@@ -553,6 +630,7 @@ function renderDailyLineReclaims(payload) {
   notifyOpeningReclaims(allLiveOpeningSignals);
   updateLineAlertControls();
   updateLineReclaimFilterControls();
+  updateLineReclaimExportControls(payload);
 }
 
 function selectedMarkets() {
@@ -1942,6 +2020,12 @@ window.addEventListener("appinstalled", () => {
 
 elements.refresh.addEventListener("click", refresh);
 if (elements.enableLineAlerts) elements.enableLineAlerts.addEventListener("click", enableLineAlerts);
+if (elements.downloadDailyLineReclaims) {
+  elements.downloadDailyLineReclaims.addEventListener("click", () => downloadLineReclaimTradingViewList("1d"));
+}
+if (elements.downloadWeeklyLineReclaims) {
+  elements.downloadWeeklyLineReclaims.addEventListener("click", () => downloadLineReclaimTradingViewList("1w"));
+}
 if (elements.installApp) elements.installApp.addEventListener("click", installApp);
 for (const marketFilter of elements.marketFilters) {
   marketFilter.addEventListener("change", () => {

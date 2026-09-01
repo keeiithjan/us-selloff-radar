@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260901-line-reclaim8">
+    <link rel="stylesheet" href="assets/styles.css?v=20260902-line-export1">
   </head>
   <body>
     <main class="shell">
@@ -60,6 +60,16 @@
               <button class="line-reclaim-filter" type="button" data-reclaim-market="us" aria-pressed="false">美股</button>
               <button class="line-reclaim-filter" type="button" data-reclaim-market="other" aria-pressed="false">其他</button>
             </div>
+          </div>
+        </div>
+        <div class="line-reclaim-export" aria-labelledby="line-reclaim-export-title">
+          <div>
+            <p id="line-reclaim-export-title" class="eyebrow">TRADINGVIEW ONE-CLICK EXPORT</p>
+            <p id="line-reclaim-export-note" class="line-reclaim-export-note" aria-live="polite">依目前線別與市場篩選，合併開盤站回及已確認第一根站回標的。</p>
+          </div>
+          <div class="line-reclaim-export-actions">
+            <button id="download-daily-line-reclaims" class="download-list line-reclaim-download" type="button">一鍵輸出日線清單</button>
+            <button id="download-weekly-line-reclaims" class="download-list line-reclaim-download weekly" type="button">一鍵輸出週線清單</button>
           </div>
         </div>
         <div class="line-reclaim-columns">
@@ -245,6 +255,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260901-line-reclaim8"></script>
+    <script src="assets/app.js?v=20260902-line-export1"></script>
   </body>
 </html>
