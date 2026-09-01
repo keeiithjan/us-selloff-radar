@@ -179,6 +179,20 @@ function formatTaipei(value) {
   }).format(new Date(value));
 }
 
+function formatTaipeiPrecise(value) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "等待資料";
+  return new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Taipei",
+  }).format(new Date(value));
+}
+
 function scanErrors(payload) {
   return Array.isArray(payload?.scan_errors)
     ? payload.scan_errors.map((error) => String(error).trim()).filter(Boolean)
@@ -416,7 +430,7 @@ function updateLineReclaimFilterControls() {
   }
 }
 
-function makeLineReclaimCard(signal, mode) {
+function makeLineReclaimCard(signal, mode, websiteUpdatedAt) {
   const isWeekly = signal.timeframe_key === "1w";
   const field = mode === "opening" ? "opening_reclaim_lines" : "first_reclaim_lines";
   const lines = lineNames(signal, field);
@@ -478,15 +492,21 @@ function makeLineReclaimCard(signal, mode) {
 
   const footer = document.createElement("div");
   footer.className = "line-reclaim-card-footer";
+  const timestamps = document.createElement("div");
+  timestamps.className = "line-reclaim-card-times";
   const time = document.createElement("span");
-  time.textContent = signal.bar_time_et || (isWeekly ? "最新週線" : "最新日線");
-  footer.append(time, makeTradingViewLink(signal, isWeekly ? "W" : "D"));
+  time.textContent = `訊號 K：${signal.bar_time_et || (isWeekly ? "最新週線" : "最新日線")}`;
+  const updated = document.createElement("span");
+  updated.className = "line-reclaim-site-updated";
+  updated.textContent = `網站更新：${formatTaipeiPrecise(websiteUpdatedAt)}`;
+  timestamps.append(time, updated);
+  footer.append(timestamps, makeTradingViewLink(signal, isWeekly ? "W" : "D"));
 
   card.append(top, badges, quote, rule, values, footer);
   return card;
 }
 
-function renderLineReclaimList(container, signals, mode) {
+function renderLineReclaimList(container, signals, mode, websiteUpdatedAt) {
   if (!container) return;
   if (signals.length === 0) {
     const empty = document.createElement("p");
@@ -498,7 +518,7 @@ function renderLineReclaimList(container, signals, mode) {
     container.replaceChildren(empty);
     return;
   }
-  container.replaceChildren(...signals.map((signal) => makeLineReclaimCard(signal, mode)));
+  container.replaceChildren(...signals.map((signal) => makeLineReclaimCard(signal, mode, websiteUpdatedAt)));
 }
 
 function notifiedLineAlertKeys() {
@@ -604,8 +624,8 @@ function renderDailyLineReclaims(payload) {
   ));
   const openingSignals = filteredLineReclaims(liveOpeningSignals, "opening_reclaim_lines");
   const firstSignals = filteredLineReclaims(latestFirstSignals, "first_reclaim_lines");
-  renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening");
-  renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first");
+  renderLineReclaimList(elements.openingReclaimSignals, openingSignals, "opening", payload?.updated_at_utc);
+  renderLineReclaimList(elements.firstReclaimSignals, firstSignals, "first", payload?.updated_at_utc);
   elements.openingReclaimCount.textContent = String(openingSignals.length);
   elements.firstReclaimCount.textContent = String(firstSignals.length);
   const weekly = lineReclaimFilterState.timeframe === "1w";

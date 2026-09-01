@@ -5,7 +5,8 @@ import vm from "node:vm";
 function fakeNode() {
   return {
     addEventListener() {},
-    append() {},
+    append(...children) { this.children.push(...children); },
+    children: [],
     classList: { add() {}, remove() {}, toggle() {} },
     dataset: {},
     disabled: false,
@@ -136,5 +137,26 @@ const taiwanWeekly = vm.runInContext(
   context,
 );
 assert.deepEqual([...taiwanWeekly], ["TWSE:2330"]);
+
+context.testCardSignal = {
+  symbol: "2330",
+  exchange: "TWSE",
+  market: "台股",
+  timeframe_key: "1d",
+  bar_time_et: "2026-08-31 日線",
+  first_reclaim_lines: ["白線"],
+  broken_lines: ["白線"],
+  first_reclaim_confirmed: true,
+};
+const card = vm.runInContext(
+  'makeLineReclaimCard(testCardSignal, "first", "2026-09-01T17:54:56Z")',
+  context,
+);
+function cardText(node) {
+  if (!node || typeof node !== "object") return "";
+  return [node.textContent, ...(node.children || []).map(cardText)].filter(Boolean).join(" ");
+}
+assert.match(cardText(card), /訊號 K：2026-08-31 日線/);
+assert.match(cardText(card), /網站更新：2026\/09\/02\s+01:54:56/);
 
 console.log("line reclaim export tests passed");

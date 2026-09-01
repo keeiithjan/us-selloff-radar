@@ -114,6 +114,8 @@ body {
 .line-reclaim-rule { margin: 10px 0 0; color: #bdd1dd; font-size: .71rem; font-weight: 700; line-height: 1.55; }
 .line-reclaim-values { margin: 7px 0 0; color: #7fa2b3; font-family: "DM Mono", monospace; font-size: .62rem; line-height: 1.55; }
 .line-reclaim-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; color: #7894a5; font-size: .62rem; }
+.line-reclaim-card-times { display: grid; min-width: 0; gap: 3px; }
+.line-reclaim-site-updated { color: #8fe8d5; font-family: "DM Mono", monospace; }
 .line-reclaim-card-footer .tv-link { margin: 0; }
 
 .hero,
