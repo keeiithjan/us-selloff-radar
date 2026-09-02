@@ -177,6 +177,12 @@ WEEKLY_SCORE_MAX = 100
 HOURLY_WHITE_RECLAIM_BONUS = {1: 10, 2: 7, 3: 4}
 MONTHLY_WHITE_ABOVE_BONUS = 10
 WEEKLY_BIG_BLACK_BODY_MIN_PCT = 3.0
+# Independent large-black-candle radar. The three-bar window is deliberately
+# based on completed candles so an unfinished daily/weekly body cannot enter
+# the website or its TradingView export and later disappear.
+BIG_BLACK_BODY_MIN_PCT = 5.0
+BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT = 5.0
+BIG_BLACK_LOOKBACK_BARS = 3
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -889,6 +895,108 @@ def ai_momentum_features(frame: pd.DataFrame) -> pd.DataFrame:
         },
         index=frame.index,
     )
+
+
+def big_black_white_break_events(
+    raw: pd.DataFrame,
+    timeframe: Timeframe,
+    session: MarketSession,
+    now: datetime,
+    lookback_bars: int = BIG_BLACK_LOOKBACK_BARS,
+) -> list[dict[str, object]]:
+    """Return recent confirmed large black bodies that cross below white.
+
+    A signal requires a black candle whose open is on/above the same candle's
+    AI Momentum white line and whose close is below it. Body decline is
+    measured from open to close. The lower wick is measured as a percentage
+    of the candle's complete high-low range, matching the dashboard wording.
+    """
+    required = {"Open", "High", "Low", "Close"}
+    if raw.empty or not required.issubset(raw.columns) or lookback_bars < 1:
+        return []
+    columns = ["Open", "High", "Low", "Close"]
+    if "Volume" in raw.columns:
+        columns.append("Volume")
+    clean = raw[columns].dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
+    if "Volume" not in clean.columns:
+        clean["Volume"] = 1.0
+
+    if timeframe.key == "1w":
+        # Equity weekly bars are confirmed at Friday's session close. Feeds
+        # without a defined close (crypto/FX) remain conservative and only use
+        # a weekly candle after the next week has begun.
+        now_local = now.astimezone(session.timezone)
+        current_date = now_local.date()
+        current_week_start = current_date - timedelta(days=current_date.weekday())
+
+        def weekly_complete(index_value: object) -> bool:
+            timestamp = pd.Timestamp(index_value)
+            if timestamp.tzinfo is None:
+                bar_date = timestamp.date()
+            else:
+                bar_date = timestamp.tz_convert(session.timezone).date()
+            bar_week_start = bar_date - timedelta(days=bar_date.weekday())
+            if bar_week_start < current_week_start:
+                return True
+            if bar_week_start > current_week_start or session.session_close is None:
+                return False
+            return bool(
+                now_local.weekday() > 4
+                or (
+                    now_local.weekday() == 4
+                    and now_local.time() >= session.session_close
+                )
+            )
+
+        clean = clean.loc[[weekly_complete(value) for value in clean.index]]
+    else:
+        clean = confirmed_bars(clean, timeframe, session, now)
+
+    if clean.empty:
+        return []
+    features = ai_momentum_features(clean)
+    if "white_kernel" not in features:
+        return []
+
+    events: list[dict[str, object]] = []
+    start = max(0, len(clean) - lookback_bars)
+    for position in range(start, len(clean)):
+        open_price = float(clean["Open"].iloc[position])
+        high_price = float(clean["High"].iloc[position])
+        low_price = float(clean["Low"].iloc[position])
+        close_price = float(clean["Close"].iloc[position])
+        white_line = float(features["white_kernel"].iloc[position])
+        values = (open_price, high_price, low_price, close_price, white_line)
+        candle_range = high_price - low_price
+        if not all(np.isfinite(value) for value in values) or open_price <= 0 or candle_range <= 0:
+            continue
+        body_drop_pct = (open_price - close_price) / open_price * 100
+        lower_wick_range_pct = (close_price - low_price) / candle_range * 100
+        body_range_pct = (open_price - close_price) / candle_range * 100
+        if not (
+            close_price < open_price
+            and open_price >= white_line
+            and close_price < white_line
+            and body_drop_pct >= BIG_BLACK_BODY_MIN_PCT
+            and 0 <= lower_wick_range_pct < BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT
+        ):
+            continue
+        events.append(
+            {
+                "position": position,
+                "bar_index_value": clean.index[position],
+                "bars_ago": len(clean) - 1 - position,
+                "open_price": round(open_price, 8),
+                "high_price": round(high_price, 8),
+                "low_price": round(low_price, 8),
+                "close_price": round(close_price, 8),
+                "white_line": round(white_line, 8),
+                "body_drop_pct": round(body_drop_pct, 4),
+                "lower_wick_range_pct": round(lower_wick_range_pct, 4),
+                "body_range_pct": round(body_range_pct, 4),
+            }
+        )
+    return events
 
 
 def daily_line_reclaim_event(
@@ -1841,6 +1949,8 @@ def collect_signals(
     trend_reclaim_signals: list[dict[str, object]] = []
     daily_line_reclaim_signals: list[dict[str, object]] = []
     daily_line_scanned_by_market: dict[str, int] = {}
+    daily_big_black_signals: list[dict[str, object]] = []
+    daily_big_black_scanned_by_market: dict[str, int] = {}
     taiwan_universe: dict[str, dict[str, str]] = {}
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
@@ -1881,6 +1991,37 @@ def collect_signals(
                             period_event["first_reclaim_confirmed"]
                         ),
                         **live_event,
+                    }
+                )
+            daily_big_black_scanned_by_market[instrument.market] = (
+                daily_big_black_scanned_by_market.get(instrument.market, 0) + 1
+            )
+            for black_event in big_black_white_break_events(
+                raw, timeframe, instrument.session, now
+            ):
+                event_index = black_event.pop("bar_index_value")
+                black_event.pop("position", None)
+                product_category = product_category_for(instrument, public_profile_cache)
+                tradingview_symbol = tradingview_symbol_for(instrument)
+                bar_date = pd.Timestamp(event_index)
+                if bar_date.tzinfo is not None:
+                    bar_date = bar_date.tz_convert(instrument.session.timezone)
+                daily_big_black_signals.append(
+                    {
+                        "signal_id": f"big-black:1d:{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "signal_type": "big_black_white_break",
+                        "timeframe_key": "1d",
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol,
+                        "market": instrument.market,
+                        "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                        "last_price": black_event["close_price"],
+                        **black_event,
                     }
                 )
         frame = confirmed_bars(raw, timeframe, instrument.session, now)
@@ -2007,6 +2148,14 @@ def collect_signals(
             str(item.get("tradingview_symbol") or ""),
         )
     )
+    daily_big_black_signals.sort(
+        key=lambda item: (
+            int(item.get("bars_ago") or 0),
+            -float(item.get("body_drop_pct") or 0),
+            str(item.get("market") or ""),
+            str(item.get("tradingview_symbol") or ""),
+        )
+    )
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -2021,6 +2170,14 @@ def collect_signals(
             "scanned_symbols": sum(daily_line_scanned_by_market.values()),
             "scanned_by_market": daily_line_scanned_by_market,
             "signals": daily_line_reclaim_signals,
+        },
+        "big_black_body_breaks": {
+            "lookback_bars": BIG_BLACK_LOOKBACK_BARS,
+            "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
+            "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
+            "scanned_symbols": sum(daily_big_black_scanned_by_market.values()),
+            "scanned_by_market": daily_big_black_scanned_by_market,
+            "signals": daily_big_black_signals,
         },
         "taiwan_pine_screener_universe": sorted(
             taiwan_universe.values(),
@@ -2051,6 +2208,8 @@ def collect_weekly_reclaims(
     signals: list[dict[str, object]] = []
     line_reclaim_signals: list[dict[str, object]] = []
     line_reclaim_scanned_by_market: dict[str, int] = {}
+    big_black_signals: list[dict[str, object]] = []
+    big_black_scanned_by_market: dict[str, int] = {}
     weekly_candidates: list[tuple[dict[str, object], Instrument, object]] = []
     scanned_by_market: dict[str, int] = {}
 
@@ -2090,6 +2249,37 @@ def collect_weekly_reclaims(
                             period_event["first_reclaim_confirmed"]
                         ),
                         **line_event,
+                    }
+                )
+            big_black_scanned_by_market[instrument.market] = (
+                big_black_scanned_by_market.get(instrument.market, 0) + 1
+            )
+            for black_event in big_black_white_break_events(
+                raw, timeframe, instrument.session, now
+            ):
+                event_index = black_event.pop("bar_index_value")
+                black_event.pop("position", None)
+                product_category = product_category_for(instrument, public_profile_cache)
+                tradingview_symbol = tradingview_symbol_for(instrument)
+                bar_date = pd.Timestamp(event_index)
+                if bar_date.tzinfo is not None:
+                    bar_date = bar_date.tz_convert(instrument.session.timezone)
+                big_black_signals.append(
+                    {
+                        "signal_id": f"big-black:1w:{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "signal_type": "big_black_white_break",
+                        "timeframe_key": "1w",
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol,
+                        "market": instrument.market,
+                        "bar_time_et": format_weekly_bar_time(event_index, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                        "last_price": black_event["close_price"],
+                        **black_event,
                     }
                 )
         frame = raw.dropna(subset=["Open", "High", "Low", "Close"]).copy().sort_index()
@@ -2207,6 +2397,14 @@ def collect_weekly_reclaims(
             str(item.get("tradingview_symbol") or ""),
         )
     )
+    big_black_signals.sort(
+        key=lambda item: (
+            int(item.get("bars_ago") or 0),
+            -float(item.get("body_drop_pct") or 0),
+            str(item.get("market") or ""),
+            str(item.get("tradingview_symbol") or ""),
+        )
+    )
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -2221,6 +2419,14 @@ def collect_weekly_reclaims(
             "scanned_symbols": sum(line_reclaim_scanned_by_market.values()),
             "scanned_by_market": line_reclaim_scanned_by_market,
             "signals": line_reclaim_signals,
+        },
+        "big_black_body_breaks": {
+            "lookback_bars": BIG_BLACK_LOOKBACK_BARS,
+            "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
+            "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
+            "scanned_symbols": sum(big_black_scanned_by_market.values()),
+            "scanned_by_market": big_black_scanned_by_market,
+            "signals": big_black_signals,
         },
     }
 
@@ -2287,7 +2493,7 @@ def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
 
 
 def line_reclaim_signal_lists(payload: dict[str, object]) -> list[list[dict[str, object]]]:
-    """Return the daily and weekly line-reclaim lists contained in a payload."""
+    """Return all website-card signal lists that persist first-show times."""
     lists: list[list[dict[str, object]]] = []
     frames = payload.get("timeframes", [])
     for frame in frames if isinstance(frames, list) else []:
@@ -2297,8 +2503,16 @@ def line_reclaim_signal_lists(payload: dict[str, object]) -> list[list[dict[str,
         signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
         if isinstance(signals, list):
             lists.append([signal for signal in signals if isinstance(signal, dict)])
+        monitor = frame.get("big_black_body_breaks", {})
+        signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
+        if isinstance(signals, list):
+            lists.append([signal for signal in signals if isinstance(signal, dict)])
     weekly = payload.get("weekly_reclaim", {})
     monitor = weekly.get("line_reclaims", {}) if isinstance(weekly, dict) else {}
+    signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
+    if isinstance(signals, list):
+        lists.append([signal for signal in signals if isinstance(signal, dict)])
+    monitor = weekly.get("big_black_body_breaks", {}) if isinstance(weekly, dict) else {}
     signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
     if isinstance(signals, list):
         lists.append([signal for signal in signals if isinstance(signal, dict)])
@@ -2307,6 +2521,8 @@ def line_reclaim_signal_lists(payload: dict[str, object]) -> list[list[dict[str,
 
 def line_reclaim_is_visible(signal: dict[str, object]) -> bool:
     """Match the front-end rules that cause a reclaim card to be displayed."""
+    if signal.get("signal_type") == "big_black_white_break":
+        return True
     opening_lines = signal.get("opening_reclaim_lines", [])
     first_lines = signal.get("first_reclaim_lines", [])
     current_period = signal.get(
@@ -2332,7 +2548,7 @@ def carry_forward_line_reclaim_first_shown(
     previous_payload: dict[str, object] | None,
     generated_at_utc: str,
 ) -> None:
-    """Persist the first website appearance time for each visible reclaim card."""
+    """Persist the first website appearance time for every eligible radar card."""
     previous_first_shown: dict[str, str] = {}
     if isinstance(previous_payload, dict):
         for signals in line_reclaim_signal_lists(previous_payload):

@@ -16,6 +16,15 @@ const elements = {
   downloadDailyLineReclaims: document.querySelector("#download-daily-line-reclaims"),
   downloadWeeklyLineReclaims: document.querySelector("#download-weekly-line-reclaims"),
   lineReclaimExportNote: document.querySelector("#line-reclaim-export-note"),
+  bigBlackCount: document.querySelector("#big-black-count"),
+  bigBlackUpdated: document.querySelector("#big-black-updated"),
+  bigBlackScanCount: document.querySelector("#big-black-scan-count"),
+  bigBlackExportNote: document.querySelector("#big-black-export-note"),
+  bigBlackSignals: document.querySelector("#big-black-signals"),
+  bigBlackTimeframeFilters: [...document.querySelectorAll("[data-big-black-timeframe]")],
+  bigBlackMarketFilters: [...document.querySelectorAll("[data-big-black-market]")],
+  downloadDailyBigBlack: document.querySelector("#download-daily-big-black"),
+  downloadWeeklyBigBlack: document.querySelector("#download-weekly-big-black"),
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
   systemStatus: document.querySelector("#system-status"),
@@ -48,6 +57,7 @@ const elements = {
 
 let sequentialPayload = null;
 const lineReclaimFilterState = { timeframe: "1d", line: "all", market: "all" };
+const bigBlackFilterState = { timeframe: "1d", market: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -651,6 +661,186 @@ function renderDailyLineReclaims(payload) {
   updateLineAlertControls();
   updateLineReclaimFilterControls();
   updateLineReclaimExportControls(payload);
+}
+
+function bigBlackMonitor(payload, timeframe) {
+  if (timeframe === "1w") return payload?.weekly_reclaim?.big_black_body_breaks || {};
+  const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
+  return frames.find((frame) => frame.key === "1d")?.big_black_body_breaks || {};
+}
+
+function filteredBigBlackSignals(payload, timeframe = bigBlackFilterState.timeframe) {
+  const signals = Array.isArray(bigBlackMonitor(payload, timeframe).signals)
+    ? bigBlackMonitor(payload, timeframe).signals
+    : [];
+  return signals.filter((signal) => (
+    bigBlackFilterState.market === "all"
+    || lineReclaimMarketGroup(signal) === bigBlackFilterState.market
+  ));
+}
+
+function exportableBigBlackSignals(payload, timeframe) {
+  const unique = new Map();
+  for (const signal of filteredBigBlackSignals(payload, timeframe)) {
+    const symbol = tradingViewImportSymbol(signal);
+    if (!symbol) continue;
+    const previous = unique.get(symbol);
+    if (
+      !previous
+      || Number(signal.bars_ago) < Number(previous.bars_ago)
+      || (
+        Number(signal.bars_ago) === Number(previous.bars_ago)
+        && Number(signal.body_drop_pct) > Number(previous.body_drop_pct)
+      )
+    ) {
+      unique.set(symbol, signal);
+    }
+  }
+  return [...unique.values()].sort(compareExportSignals);
+}
+
+function bigBlackFilterDescription() {
+  return { all: "全部市場", taiwan: "台股", us: "美股", other: "其他" }[bigBlackFilterState.market] || "全部市場";
+}
+
+function updateBigBlackControls(payload) {
+  for (const button of elements.bigBlackTimeframeFilters) {
+    const active = button.dataset.bigBlackTimeframe === bigBlackFilterState.timeframe;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  for (const button of elements.bigBlackMarketFilters) {
+    const active = button.dataset.bigBlackMarket === bigBlackFilterState.market;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const dailyCount = exportableBigBlackSignals(payload, "1d").length;
+  const weeklyCount = exportableBigBlackSignals(payload, "1w").length;
+  if (elements.downloadDailyBigBlack) {
+    elements.downloadDailyBigBlack.textContent = `一鍵輸出日線清單（${dailyCount}）`;
+    elements.downloadDailyBigBlack.disabled = dailyCount === 0;
+  }
+  if (elements.downloadWeeklyBigBlack) {
+    elements.downloadWeeklyBigBlack.textContent = `一鍵輸出週線清單（${weeklyCount}）`;
+    elements.downloadWeeklyBigBlack.disabled = weeklyCount === 0;
+  }
+  if (elements.bigBlackExportNote) {
+    elements.bigBlackExportNote.textContent = `目前篩選：${bigBlackFilterDescription()}｜日線 ${dailyCount} 檔、週線 ${weeklyCount} 檔；同一標的自動去重。`;
+  }
+}
+
+function makeBigBlackCard(signal) {
+  const isWeekly = signal.timeframe_key === "1w";
+  const card = document.createElement("article");
+  card.className = "big-black-card";
+
+  const top = document.createElement("div");
+  top.className = "line-reclaim-card-top";
+  const identity = document.createElement("div");
+  const ticker = document.createElement("h3");
+  ticker.textContent = signal.name ? `${signal.symbol} ${signal.name}` : signal.symbol;
+  const market = document.createElement("p");
+  market.textContent = `${displayMarket(signal.market)} · ${industryText(signal)}`;
+  identity.append(ticker, market);
+  const age = document.createElement("span");
+  age.className = "line-reclaim-session closed";
+  age.textContent = Number(signal.bars_ago) === 0
+    ? `最新完成${isWeekly ? "週K" : "日K"}`
+    : `${Number(signal.bars_ago)} 根前`;
+  top.append(identity, age);
+
+  const badges = document.createElement("div");
+  badges.className = "line-reclaim-badges";
+  for (const label of ["大黑 K", "實體跌破白線", "下引線 < 5%"] ) {
+    const badge = document.createElement("span");
+    badge.textContent = label;
+    badges.append(badge);
+  }
+
+  const metrics = document.createElement("div");
+  metrics.className = "big-black-metrics";
+  for (const [label, value] of [
+    ["實體跌幅", `-${Number(signal.body_drop_pct).toFixed(2)}%`],
+    ["下引線／整根", `${Number(signal.lower_wick_range_pct).toFixed(2)}%`],
+    ["實體／整根", `${Number(signal.body_range_pct).toFixed(2)}%`],
+  ]) {
+    const metric = document.createElement("div");
+    metric.className = "big-black-metric";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    metric.append(labelNode, valueNode);
+    metrics.append(metric);
+  }
+
+  const rule = document.createElement("p");
+  rule.className = "line-reclaim-rule";
+  rule.textContent = `O ${plainQuote(signal.open_price)} ≥ 白線 ${plainQuote(signal.white_line)}，C ${plainQuote(signal.close_price)} < 白線；H ${plainQuote(signal.high_price)} ／ L ${plainQuote(signal.low_price)}。`;
+
+  const footer = document.createElement("div");
+  footer.className = "line-reclaim-card-footer";
+  const timestamps = document.createElement("div");
+  timestamps.className = "line-reclaim-card-times";
+  const time = document.createElement("span");
+  time.textContent = `訊號 K：${signal.bar_time_et || "已完成 K 棒"}`;
+  const firstShown = document.createElement("span");
+  firstShown.className = "line-reclaim-first-shown";
+  firstShown.textContent = `首次顯示：${formatTaipeiPrecise(signal.first_shown_at_utc)}`;
+  timestamps.append(time, firstShown);
+  footer.append(timestamps, makeTradingViewLink(signal, isWeekly ? "W" : "D"));
+  card.append(top, badges, metrics, rule, footer);
+  return card;
+}
+
+function renderBigBlackBreaks(payload) {
+  if (!elements.bigBlackSignals) return;
+  const timeframe = bigBlackFilterState.timeframe;
+  const monitor = bigBlackMonitor(payload, timeframe);
+  const signals = filteredBigBlackSignals(payload, timeframe);
+  elements.bigBlackCount.textContent = String(signals.length);
+  elements.bigBlackUpdated.textContent = payload?.updated_at_utc
+    ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
+    : "等待首次掃描";
+  const markets = Object.entries(monitor.scanned_by_market || {})
+    .map(([market, count]) => `${displayMarket(market)} ${Number(count).toLocaleString("zh-TW")} 檔`)
+    .join("、");
+  elements.bigBlackScanCount.textContent = monitor.scanned_symbols
+    ? `近 3 根已完成${timeframe === "1w" ? "週 K" : "日 K"}｜掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
+    : `等待新版${timeframe === "1w" ? "週線" : "日線"}大黑 K 資料`;
+  if (signals.length) {
+    elements.bigBlackSignals.replaceChildren(...signals.map(makeBigBlackCard));
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "line-reclaim-empty";
+    empty.textContent = `目前${bigBlackFilterDescription()}最近 3 根已完成${timeframe === "1w" ? "週 K" : "日 K"}，沒有符合條件的標的。`;
+    elements.bigBlackSignals.replaceChildren(empty);
+  }
+  updateBigBlackControls(payload);
+}
+
+function downloadBigBlackTradingViewList(timeframe) {
+  const signals = exportableBigBlackSignals(sequentialPayload, timeframe);
+  const periodLabel = timeframe === "1w" ? "週線" : "日線";
+  if (!signals.length) {
+    if (elements.bigBlackExportNote) {
+      elements.bigBlackExportNote.textContent = `目前${bigBlackFilterDescription()}沒有可匯出的${periodLabel}大黑 K 標的。`;
+    }
+    return;
+  }
+  const symbols = signals.map(tradingViewImportSymbol);
+  const blob = new Blob([`${symbols.join("\n")}\n`], { type: "text/plain;charset=utf-8" });
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `KJ-Radar-${timeframe === "1w" ? "Weekly" : "Daily"}-Big-Black-White-Break-${new Date().toISOString().slice(0, 10)}.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+  if (elements.bigBlackExportNote) {
+    elements.bigBlackExportNote.textContent = `已輸出 ${symbols.length} 個${periodLabel}大黑 K 代碼（${bigBlackFilterDescription()}），可直接匯入 TradingView。`;
+  }
 }
 
 function selectedMarkets() {
@@ -1908,6 +2098,7 @@ function renderSequential(payload) {
   sequentialPayload = payload;
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   renderDailyLineReclaims(payload);
+  renderBigBlackBreaks(payload);
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   renderTrendReclaims(frames);
   renderWeeklyReclaims(payload);
@@ -2046,6 +2237,12 @@ if (elements.downloadDailyLineReclaims) {
 if (elements.downloadWeeklyLineReclaims) {
   elements.downloadWeeklyLineReclaims.addEventListener("click", () => downloadLineReclaimTradingViewList("1w"));
 }
+if (elements.downloadDailyBigBlack) {
+  elements.downloadDailyBigBlack.addEventListener("click", () => downloadBigBlackTradingViewList("1d"));
+}
+if (elements.downloadWeeklyBigBlack) {
+  elements.downloadWeeklyBigBlack.addEventListener("click", () => downloadBigBlackTradingViewList("1w"));
+}
 if (elements.installApp) elements.installApp.addEventListener("click", installApp);
 for (const marketFilter of elements.marketFilters) {
   marketFilter.addEventListener("change", () => {
@@ -2082,6 +2279,18 @@ for (const button of elements.lineReclaimMarketFilters) {
   button.addEventListener("click", () => {
     lineReclaimFilterState.market = button.dataset.reclaimMarket || "all";
     if (sequentialPayload) renderDailyLineReclaims(sequentialPayload);
+  });
+}
+for (const button of elements.bigBlackTimeframeFilters) {
+  button.addEventListener("click", () => {
+    bigBlackFilterState.timeframe = button.dataset.bigBlackTimeframe || "1d";
+    if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
+  });
+}
+for (const button of elements.bigBlackMarketFilters) {
+  button.addEventListener("click", () => {
+    bigBlackFilterState.market = button.dataset.bigBlackMarket || "all";
+    if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
   });
 }
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);

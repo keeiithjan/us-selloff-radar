@@ -15,6 +15,7 @@ from sequential import (
     TIMEFRAMES,
     US_SESSION,
     WEEKLY_RECLAIM_TIMEFRAME,
+    big_black_white_break_events,
     carry_forward_line_reclaim_first_shown,
     daily_line_reclaim_event,
     is_current_period_bar,
@@ -38,6 +39,116 @@ def base_frame() -> pd.DataFrame:
 
 
 class DailyLineReclaimTests(unittest.TestCase):
+    def test_big_black_requires_large_body_white_cross_and_small_lower_wick(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        signal_position = len(frame) - 1
+        frame.iloc[signal_position, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[signal_position, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[signal_position, frame.columns.get_loc("Low")] = 99.95
+        frame.iloc[signal_position, frame.columns.get_loc("Close")] = 100.0
+        features = pd.DataFrame({"white_kernel": 103.0}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["bars_ago"], 0)
+        self.assertGreaterEqual(events[0]["body_drop_pct"], 5)
+        self.assertLess(events[0]["lower_wick_range_pct"], 5)
+
+    def test_big_black_rejects_lower_wick_at_or_above_five_percent(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 99.0
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.0
+        features = pd.DataFrame({"white_kernel": 103.0}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(events, [])
+
+    def test_big_black_daily_search_is_limited_to_last_three_completed_bars(self) -> None:
+        frame = base_frame().iloc[:9].copy()
+        frame.iloc[-4, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[-4, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[-4, frame.columns.get_loc("Low")] = 99.95
+        frame.iloc[-4, frame.columns.get_loc("Close")] = 100.0
+        features = pd.DataFrame({"white_kernel": 103.0}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(events, [])
+
+    def test_big_black_weekly_excludes_the_unfinished_current_week(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        frame.index = pd.date_range("2026-07-13", periods=len(frame), freq="W-MON")
+        for position in (-2, -1):
+            frame.iloc[position, frame.columns.get_loc("Open")] = 106.0
+            frame.iloc[position, frame.columns.get_loc("High")] = 106.2
+            frame.iloc[position, frame.columns.get_loc("Low")] = 99.95
+            frame.iloc[position, frame.columns.get_loc("Close")] = 100.0
+        latest_monday = frame.index[-1].date()
+        now = datetime.combine(
+            latest_monday + timedelta(days=1),
+            datetime.min.time().replace(hour=13),
+            tzinfo=ZoneInfo("America/New_York"),
+        )
+
+        def white_features(clean: pd.DataFrame) -> pd.DataFrame:
+            return pd.DataFrame({"white_kernel": 103.0}, index=clean.index)
+
+        with patch("sequential.ai_momentum_features", side_effect=white_features):
+            events = big_black_white_break_events(
+                frame, WEEKLY_RECLAIM_TIMEFRAME, US_SESSION, now
+            )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["bar_index_value"], frame.index[-2])
+        self.assertEqual(events[0]["bars_ago"], 0)
+
+    def test_big_black_first_shown_time_is_persisted(self) -> None:
+        prior_time = "2026-09-02T11:00:00+00:00"
+        current_time = "2026-09-03T11:00:00+00:00"
+        signal_id = "big-black:1d:NASDAQ:AAA:2026-09-02"
+        previous = {
+            "timeframes": [{
+                "key": "1d",
+                "daily_line_reclaims": {"signals": []},
+                "big_black_body_breaks": {"signals": [{
+                    "signal_id": signal_id,
+                    "signal_type": "big_black_white_break",
+                    "first_shown_at_utc": prior_time,
+                }]},
+            }],
+            "weekly_reclaim": {"line_reclaims": {"signals": []}},
+        }
+        payload = {
+            "timeframes": [{
+                "key": "1d",
+                "daily_line_reclaims": {"signals": []},
+                "big_black_body_breaks": {"signals": [
+                    {"signal_id": signal_id, "signal_type": "big_black_white_break"},
+                    {"signal_id": "big-black:1d:NYSE:BBB:2026-09-03", "signal_type": "big_black_white_break"},
+                ]},
+            }],
+            "weekly_reclaim": {"line_reclaims": {"signals": []}},
+        }
+
+        carry_forward_line_reclaim_first_shown(payload, previous, current_time)
+
+        signals = payload["timeframes"][0]["big_black_body_breaks"]["signals"]
+        self.assertEqual(signals[0]["first_shown_at_utc"], prior_time)
+        self.assertEqual(signals[1]["first_shown_at_utc"], current_time)
+
     def test_first_shown_time_is_carried_forward_by_signal_id(self) -> None:
         prior_time = "2026-09-01T13:30:01+00:00"
         current_time = "2026-09-02T13:30:02+00:00"

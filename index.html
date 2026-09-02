@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260902-card-first-shown1">
+    <link rel="stylesheet" href="assets/styles.css?v=20260903-big-black1">
   </head>
   <body>
     <main class="shell">
@@ -97,6 +97,47 @@
               <p class="line-reclaim-empty">正在同步第一根站回訊號…</p>
             </div>
           </section>
+        </div>
+      </section>
+
+      <section class="big-black-command" aria-labelledby="big-black-title">
+        <div class="big-black-head">
+          <div>
+            <p class="eyebrow">LARGE BEARISH BODY · WHITE-LINE BREAK</p>
+            <h2 id="big-black-title">大黑 K 實體跌破白線雷達</h2>
+            <p class="big-black-lede">只收錄已完成 K 棒：黑 K 實體跌幅至少 5%，同一根開盤在白線上、收盤跌到白線下，且下引線占整根高低區間小於 5%。日線搜尋最近 3 個交易日；週線搜尋最近 3 根已完成週 K。</p>
+          </div>
+          <strong id="big-black-count" class="big-black-count">0</strong>
+        </div>
+        <div class="big-black-toolbar">
+          <div class="line-reclaim-filter-group">
+            <span>週期</span>
+            <div role="group" aria-label="大黑K週期篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-big-black-timeframe="1d" aria-pressed="true">日線</button>
+              <button class="line-reclaim-filter" type="button" data-big-black-timeframe="1w" aria-pressed="false">週線</button>
+            </div>
+          </div>
+          <div class="line-reclaim-filter-group">
+            <span>市場</span>
+            <div role="group" aria-label="大黑K市場篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-big-black-market="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter" type="button" data-big-black-market="taiwan" aria-pressed="false">台股</button>
+              <button class="line-reclaim-filter" type="button" data-big-black-market="us" aria-pressed="false">美股</button>
+              <button class="line-reclaim-filter" type="button" data-big-black-market="other" aria-pressed="false">其他</button>
+            </div>
+          </div>
+          <div class="big-black-export-actions">
+            <button id="download-daily-big-black" class="download-list big-black-download" type="button">一鍵輸出日線清單</button>
+            <button id="download-weekly-big-black" class="download-list big-black-download weekly" type="button">一鍵輸出週線清單</button>
+          </div>
+        </div>
+        <div class="big-black-summary" aria-live="polite">
+          <p id="big-black-updated">正在讀取大黑 K 訊號…</p>
+          <p id="big-black-scan-count">等待掃描資料</p>
+          <p id="big-black-export-note">日線與週線清單會沿用目前市場分類並自動去重。</p>
+        </div>
+        <div id="big-black-signals" class="big-black-signals" aria-live="polite">
+          <p class="line-reclaim-empty">正在同步最近 3 根已完成 K 棒…</p>
         </div>
       </section>
 
@@ -255,6 +296,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260902-card-first-shown1"></script>
+    <script src="assets/app.js?v=20260903-big-black1"></script>
   </body>
 </html>
