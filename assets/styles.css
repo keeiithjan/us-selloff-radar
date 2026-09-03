@@ -147,7 +147,7 @@ body {
 .big-black-card h3 { margin: 0; color: #fdf3f5; font-size: .96rem; }
 .big-black-card .line-reclaim-card-top p { margin: 4px 0 0; color: #9c8490; font-size: .66rem; line-height: 1.4; }
 .big-black-card .line-reclaim-session { border-color: rgb(255 113 136 / 38%); background: rgb(255 95 119 / 9%); color: #ffa4b2; }
-.big-black-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 11px; }
+.big-black-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 11px; }
 .big-black-metric { padding: 8px; border: 1px solid rgb(139 112 132 / 20%); border-radius: 7px; background: rgb(3 10 20 / 46%); }
 .big-black-metric span, .big-black-metric strong { display: block; }
 .big-black-metric span { color: #897683; font-size: .58rem; }
@@ -798,6 +798,7 @@ footer p { margin-bottom: 8px; }
   .big-black-command { padding: 18px; }
   .big-black-export-actions { justify-content: flex-start; }
   .big-black-signals { grid-template-columns: 1fr; }
+  .big-black-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero, .section-heading { gap: 16px; }
   .hero { flex-direction: column; }
   .hero-actions { width: 100%; grid-template-columns: auto 1fr; align-items: center; justify-items: start; }

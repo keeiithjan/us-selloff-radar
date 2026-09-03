@@ -19,6 +19,7 @@ const elements = {
   bigBlackCount: document.querySelector("#big-black-count"),
   bigBlackUpdated: document.querySelector("#big-black-updated"),
   bigBlackScanCount: document.querySelector("#big-black-scan-count"),
+  bigBlackRelationCount: document.querySelector("#big-black-relation-count"),
   bigBlackExportNote: document.querySelector("#big-black-export-note"),
   bigBlackSignals: document.querySelector("#big-black-signals"),
   bigBlackTimeframeFilters: [...document.querySelectorAll("[data-big-black-timeframe]")],
@@ -731,6 +732,8 @@ function updateBigBlackControls(payload) {
 
 function makeBigBlackCard(signal) {
   const isWeekly = signal.timeframe_key === "1w";
+  const breaksWhite = signal.breaks_white === true || signal.white_relation === "break";
+  const relationLabel = breaksWhite ? "實體跌破白線" : "收盤貼近白線";
   const card = document.createElement("article");
   card.className = "big-black-card";
 
@@ -751,7 +754,7 @@ function makeBigBlackCard(signal) {
 
   const badges = document.createElement("div");
   badges.className = "line-reclaim-badges";
-  for (const label of ["大黑 K", "實體跌破白線", "下引線 < 5%"] ) {
+  for (const label of ["大黑 K", relationLabel, "下引線 < 10%"] ) {
     const badge = document.createElement("span");
     badge.textContent = label;
     badges.append(badge);
@@ -762,6 +765,7 @@ function makeBigBlackCard(signal) {
   for (const [label, value] of [
     ["實體跌幅", `-${Number(signal.body_drop_pct).toFixed(2)}%`],
     ["下引線／整根", `${Number(signal.lower_wick_range_pct).toFixed(2)}%`],
+    ["收盤距白線", `${formatSigned(signal.white_distance_pct, 2)}%`],
     ["實體／整根", `${Number(signal.body_range_pct).toFixed(2)}%`],
   ]) {
     const metric = document.createElement("div");
@@ -776,7 +780,9 @@ function makeBigBlackCard(signal) {
 
   const rule = document.createElement("p");
   rule.className = "line-reclaim-rule";
-  rule.textContent = `O ${plainQuote(signal.open_price)} ≥ 白線 ${plainQuote(signal.white_line)}，C ${plainQuote(signal.close_price)} < 白線；H ${plainQuote(signal.high_price)} ／ L ${plainQuote(signal.low_price)}。`;
+  rule.textContent = breaksWhite
+    ? `實體穿越白線：O ${plainQuote(signal.open_price)} ≥ 白線 ${plainQuote(signal.white_line)}，C ${plainQuote(signal.close_price)} < 白線；H ${plainQuote(signal.high_price)} ／ L ${plainQuote(signal.low_price)}。`
+    : `未穿越白線，但收盤距白線 ${formatSigned(signal.white_distance_pct, 2)}%：O ${plainQuote(signal.open_price)} ／ C ${plainQuote(signal.close_price)} ／ 白線 ${plainQuote(signal.white_line)}。`;
 
   const footer = document.createElement("div");
   footer.className = "line-reclaim-card-footer";
@@ -808,6 +814,13 @@ function renderBigBlackBreaks(payload) {
   elements.bigBlackScanCount.textContent = monitor.scanned_symbols
     ? `近 3 根已完成${timeframe === "1w" ? "週 K" : "日 K"}｜掃描 ${Number(monitor.scanned_symbols).toLocaleString("zh-TW")} 檔${markets ? `｜${markets}` : ""}`
     : `等待新版${timeframe === "1w" ? "週線" : "日線"}大黑 K 資料`;
+  const breakCount = signals.filter((signal) => (
+    signal.breaks_white === true || signal.white_relation === "break"
+  )).length;
+  const nearCount = signals.length - breakCount;
+  if (elements.bigBlackRelationCount) {
+    elements.bigBlackRelationCount.textContent = `目前顯示：實體跌破白線 ${breakCount} 檔｜收盤貼近白線 ${nearCount} 檔`;
+  }
   if (signals.length) {
     elements.bigBlackSignals.replaceChildren(...signals.map(makeBigBlackCard));
   } else {

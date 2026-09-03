@@ -58,13 +58,64 @@ class DailyLineReclaimTests(unittest.TestCase):
         self.assertGreaterEqual(events[0]["body_drop_pct"], 5)
         self.assertLess(events[0]["lower_wick_range_pct"], 5)
 
-    def test_big_black_rejects_lower_wick_at_or_above_five_percent(self) -> None:
+    def test_big_black_accepts_lower_wick_between_five_and_ten_percent(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 99.5
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.0
+        features = pd.DataFrame({"white_kernel": 103.0}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(len(events), 1)
+        self.assertGreater(events[0]["lower_wick_range_pct"], 5)
+        self.assertLess(events[0]["lower_wick_range_pct"], 10)
+
+    def test_big_black_rejects_lower_wick_at_or_above_ten_percent(self) -> None:
         frame = base_frame().iloc[:8].copy()
         frame.iloc[-1, frame.columns.get_loc("Open")] = 106.0
         frame.iloc[-1, frame.columns.get_loc("High")] = 106.2
         frame.iloc[-1, frame.columns.get_loc("Low")] = 99.0
         frame.iloc[-1, frame.columns.get_loc("Close")] = 100.0
         features = pd.DataFrame({"white_kernel": 103.0}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(events, [])
+
+    def test_big_black_accepts_close_within_one_percent_above_white(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 107.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 107.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 100.95
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 101.0
+        features = pd.DataFrame({"white_kernel": 100.5}, index=frame.index)
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0]["breaks_white"])
+        self.assertTrue(events[0]["near_white"])
+        self.assertEqual(events[0]["white_relation"], "near")
+        self.assertLessEqual(abs(events[0]["white_distance_pct"]), 1)
+
+    def test_big_black_rejects_non_break_more_than_one_percent_from_white(self) -> None:
+        frame = base_frame().iloc[:8].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 107.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 107.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 101.45
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 101.5
+        features = pd.DataFrame({"white_kernel": 100.0}, index=frame.index)
         daily = next(item for item in TIMEFRAMES if item.key == "1d")
         now = datetime(2026, 5, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
 

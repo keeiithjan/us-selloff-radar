@@ -181,7 +181,8 @@ WEEKLY_BIG_BLACK_BODY_MIN_PCT = 3.0
 # based on completed candles so an unfinished daily/weekly body cannot enter
 # the website or its TradingView export and later disappear.
 BIG_BLACK_BODY_MIN_PCT = 5.0
-BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT = 5.0
+BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT = 10.0
+BIG_BLACK_WHITE_NEAR_PCT = 1.0
 BIG_BLACK_LOOKBACK_BARS = 3
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
@@ -904,10 +905,10 @@ def big_black_white_break_events(
     now: datetime,
     lookback_bars: int = BIG_BLACK_LOOKBACK_BARS,
 ) -> list[dict[str, object]]:
-    """Return recent confirmed large black bodies that cross below white.
+    """Return recent confirmed large black bodies that cross or approach white.
 
-    A signal requires a black candle whose open is on/above the same candle's
-    AI Momentum white line and whose close is below it. Body decline is
+    A signal either crosses the same candle's AI Momentum white line with its
+    real body, or closes within one percent of that line. Body decline is
     measured from open to close. The lower wick is measured as a percentage
     of the candle's complete high-low range, matching the dashboard wording.
     """
@@ -968,17 +969,24 @@ def big_black_white_break_events(
         white_line = float(features["white_kernel"].iloc[position])
         values = (open_price, high_price, low_price, close_price, white_line)
         candle_range = high_price - low_price
-        if not all(np.isfinite(value) for value in values) or open_price <= 0 or candle_range <= 0:
+        if (
+            not all(np.isfinite(value) for value in values)
+            or open_price <= 0
+            or white_line <= 0
+            or candle_range <= 0
+        ):
             continue
         body_drop_pct = (open_price - close_price) / open_price * 100
         lower_wick_range_pct = (close_price - low_price) / candle_range * 100
         body_range_pct = (open_price - close_price) / candle_range * 100
+        white_distance_pct = (close_price / white_line - 1) * 100
+        breaks_white = bool(open_price >= white_line and close_price < white_line)
+        near_white = bool(abs(white_distance_pct) <= BIG_BLACK_WHITE_NEAR_PCT)
         if not (
             close_price < open_price
-            and open_price >= white_line
-            and close_price < white_line
             and body_drop_pct >= BIG_BLACK_BODY_MIN_PCT
             and 0 <= lower_wick_range_pct < BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT
+            and (breaks_white or near_white)
         ):
             continue
         events.append(
@@ -994,6 +1002,10 @@ def big_black_white_break_events(
                 "body_drop_pct": round(body_drop_pct, 4),
                 "lower_wick_range_pct": round(lower_wick_range_pct, 4),
                 "body_range_pct": round(body_range_pct, 4),
+                "white_distance_pct": round(white_distance_pct, 4),
+                "breaks_white": breaks_white,
+                "near_white": near_white,
+                "white_relation": "break" if breaks_white else "near",
             }
         )
     return events
@@ -2175,6 +2187,7 @@ def collect_signals(
             "lookback_bars": BIG_BLACK_LOOKBACK_BARS,
             "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
             "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
+            "white_near_pct": BIG_BLACK_WHITE_NEAR_PCT,
             "scanned_symbols": sum(daily_big_black_scanned_by_market.values()),
             "scanned_by_market": daily_big_black_scanned_by_market,
             "signals": daily_big_black_signals,
@@ -2424,6 +2437,7 @@ def collect_weekly_reclaims(
             "lookback_bars": BIG_BLACK_LOOKBACK_BARS,
             "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
             "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
+            "white_near_pct": BIG_BLACK_WHITE_NEAR_PCT,
             "scanned_symbols": sum(big_black_scanned_by_market.values()),
             "scanned_by_market": big_black_scanned_by_market,
             "signals": big_black_signals,

@@ -222,6 +222,10 @@ context.testBigBlackCardSignal = {
   body_drop_pct: 5.6604,
   lower_wick_range_pct: 0.8,
   body_range_pct: 96,
+  white_distance_pct: -2.9126,
+  breaks_white: true,
+  near_white: false,
+  white_relation: "break",
   first_shown_at_utc: "2026-09-03T01:02:03Z",
 };
 const bigBlackCard = vm.runInContext(
@@ -231,6 +235,26 @@ const bigBlackCard = vm.runInContext(
 assert.match(cardText(bigBlackCard), /大黑 K/);
 assert.match(cardText(bigBlackCard), /實體跌破白線/);
 assert.match(cardText(bigBlackCard), /實體跌幅 -5\.66%/);
+assert.match(cardText(bigBlackCard), /下引線 < 10%/);
+assert.match(cardText(bigBlackCard), /收盤距白線 -2\.91%/);
 assert.match(cardText(bigBlackCard), /首次顯示：2026\/09\/03\s+09:02:03/);
+
+context.testNearWhiteCardSignal = {
+  ...context.testBigBlackCardSignal,
+  symbol: "NEAR",
+  open_price: 107,
+  close_price: 101,
+  white_line: 100.5,
+  white_distance_pct: 0.4975,
+  breaks_white: false,
+  near_white: true,
+  white_relation: "near",
+};
+const nearWhiteCard = vm.runInContext(
+  'makeBigBlackCard(testNearWhiteCardSignal)',
+  context,
+);
+assert.match(cardText(nearWhiteCard), /收盤貼近白線/);
+assert.match(cardText(nearWhiteCard), /未穿越白線，但收盤距白線 \+0\.50%/);
 
 console.log("line reclaim export tests passed");
