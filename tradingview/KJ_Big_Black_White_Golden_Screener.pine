@@ -1,0 +1,78 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// AI Momentum kernel concept: © YinYangAlgorithms
+//@version=6
+indicator("KJ 大黑K白線＋白黃金叉 Screener", shorttitle="KJ 大黑K金叉", overlay=true, max_labels_count=100)
+
+import jdehorty/KernelFunctions/2 as kernels
+
+groupLine = "AI Momentum 白線／黃線"
+zoneInsideLength = input.int(50, "Zone Inside Length", minval=5, group=groupLine)
+kernelLookback = input.int(8, "Lookback Window", minval=3, maxval=50, group=groupLine)
+relativeWeighting = input.float(8.0, "Relative Weighting", minval=0.25, maxval=25.0, step=0.25, group=groupLine)
+startBar = input.int(25, "Start Regression at Bar", minval=5, maxval=100, group=groupLine)
+
+groupSignal = "大黑 K 條件"
+bodyMinPct = input.float(5.0, "實體跌幅至少 (%)", minval=0.1, step=0.1, group=groupSignal)
+lowerWickMaxPct = input.float(10.0, "下引線／整根嚴格小於 (%)", minval=0.1, maxval=100.0, step=0.1, group=groupSignal)
+whiteNearPct = input.float(1.0, "收盤貼近白線範圍 ± (%)", minval=0.0, step=0.1, group=groupSignal)
+recentBars = input.int(3, "訊號保留最近完成 K 棒數", minval=1, maxval=20, group=groupSignal)
+
+groupGolden = "白黃線黃金交叉"
+goldenWindowBars = input.int(50, "黃金交叉後有效 K 棒數", minval=1, maxval=200, group=groupGolden)
+showMarks = input.bool(true, "圖表顯示訊號標記", group=groupGolden)
+
+insideHigh = kernels.rationalQuadratic(ta.highest(high, zoneInsideLength), kernelLookback, relativeWeighting, startBar)
+insideLow = kernels.rationalQuadratic(ta.lowest(low, zoneInsideLength), kernelLookback, relativeWeighting, startBar)
+whiteLine = kernels.rationalQuadratic(close, kernelLookback, relativeWeighting, startBar)
+yellowLine = math.avg(insideHigh, insideLow)
+
+confirmed = barstate.isconfirmed
+candleRange = high - low
+bodyDropPct = open > 0 ? (open - close) / open * 100.0 : na
+lowerWickRangePct = candleRange > 0 ? (close - low) / candleRange * 100.0 : na
+bodyRangePct = candleRange > 0 ? (open - close) / candleRange * 100.0 : na
+whiteDistancePct = whiteLine > 0 ? (close / whiteLine - 1.0) * 100.0 : na
+blackBody = close < open
+bodyBreaksWhite = blackBody and open >= whiteLine and close < whiteLine
+closeNearWhite = blackBody and math.abs(whiteDistancePct) <= whiteNearPct
+largeBlackSignal = confirmed and blackBody and bodyDropPct >= bodyMinPct and lowerWickRangePct >= 0 and lowerWickRangePct < lowerWickMaxPct and (bodyBreaksWhite or closeNearWhite)
+
+whiteYellowGoldenCross = ta.crossover(whiteLine, yellowLine)
+goldenCrossAge = ta.barssince(whiteYellowGoldenCross)
+goldenCrossWithinWindow = not na(goldenCrossAge) and goldenCrossAge < goldenWindowBars
+
+signalAge = ta.barssince(largeBlackSignal)
+latestAllowedAge = confirmed ? recentBars - 1 : recentBars
+recentSignal = not na(signalAge) and signalAge <= latestAllowedAge
+signalWasBreak = ta.valuewhen(largeBlackSignal, bodyBreaksWhite ? 1 : 0, 0)
+signalWasNear = ta.valuewhen(largeBlackSignal, closeNearWhite ? 1 : 0, 0)
+signalGoldenMatch = ta.valuewhen(largeBlackSignal, goldenCrossWithinWindow ? 1 : 0, 0)
+signalGoldenAge = ta.valuewhen(largeBlackSignal, goldenCrossAge, 0)
+signalBodyDropPct = ta.valuewhen(largeBlackSignal, bodyDropPct, 0)
+signalLowerWickPct = ta.valuewhen(largeBlackSignal, lowerWickRangePct, 0)
+signalWhiteDistancePct = ta.valuewhen(largeBlackSignal, whiteDistancePct, 0)
+signalBodyRangePct = ta.valuewhen(largeBlackSignal, bodyRangePct, 0)
+
+candidateValue = recentSignal ? 1 : 0
+goldenCandidateValue = recentSignal and signalGoldenMatch == 1 ? 1 : 0
+breakCandidateValue = recentSignal and signalWasBreak == 1 ? 1 : 0
+nearCandidateValue = recentSignal and signalWasNear == 1 ? 1 : 0
+
+plot(candidateValue, "KJ 大黑K近3根", display=display.data_window + display.pine_screener)
+plot(goldenCandidateValue, "KJ 金叉後低於50根", display=display.data_window + display.pine_screener)
+plot(breakCandidateValue, "KJ 實體跌破白線", display=display.data_window + display.pine_screener)
+plot(nearCandidateValue, "KJ 收最低貼近白線", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalAge : na, "KJ 訊號距今K棒", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalBodyDropPct : na, "KJ 實體跌幅%", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalLowerWickPct : na, "KJ 下引線整根%", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalWhiteDistancePct : na, "KJ 收盤距白線%", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalGoldenAge : na, "KJ 訊號當根金叉距離", display=display.data_window + display.pine_screener)
+plot(recentSignal ? signalBodyRangePct : na, "KJ 實體整根%", display=display.data_window + display.pine_screener)
+
+plot(whiteLine, "AI 白線", color=color.white, linewidth=2, display=display.all - display.pine_screener)
+plot(yellowLine, "AI 黃線", color=color.yellow, linewidth=2, display=display.all - display.pine_screener)
+plotshape(showMarks and largeBlackSignal, title="大黑K候選", style=shape.labeldown, location=location.abovebar, color=color.rgb(226, 61, 82), text="大黑K", textcolor=color.white, size=size.tiny)
+plotshape(showMarks and largeBlackSignal and goldenCrossWithinWindow, title="金叉50根內大黑K", style=shape.labeldown, location=location.belowbar, color=color.rgb(232, 183, 50), text="金叉<50", textcolor=color.black, size=size.tiny)
+
+alertcondition(largeBlackSignal, "KJ 大黑K跌破／貼近白線", "{{ticker}} 已完成K棒：大黑K實體跌破白線，或幾乎收最低且收盤貼近白線。")
+alertcondition(largeBlackSignal and goldenCrossWithinWindow, "KJ 金叉50根內大黑K", "{{ticker}} 白線向上穿越黃線後未滿50根，出現大黑K跌破／貼近白線。")

@@ -184,6 +184,7 @@ BIG_BLACK_BODY_MIN_PCT = 5.0
 BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT = 10.0
 BIG_BLACK_WHITE_NEAR_PCT = 1.0
 BIG_BLACK_LOOKBACK_BARS = 3
+BIG_BLACK_GOLDEN_CROSS_WINDOW_BARS = 50
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -911,6 +912,9 @@ def big_black_white_break_events(
     real body, or closes within one percent of that line. Body decline is
     measured from open to close. The lower wick is measured as a percentage
     of the candle's complete high-low range, matching the dashboard wording.
+    Each event also records how many bars had elapsed since the most recent
+    white-over-yellow golden cross as of the signal bar.  The optional website
+    filter therefore cannot change retroactively as newer bars arrive.
     """
     required = {"Open", "High", "Low", "Close"}
     if raw.empty or not required.issubset(raw.columns) or lookback_bars < 1:
@@ -959,6 +963,28 @@ def big_black_white_break_events(
     if "white_kernel" not in features:
         return []
 
+    # Store the most recent confirmed white-over-yellow crossover through each
+    # historical position.  Missing yellow data is tolerated for older tests
+    # and partial feeds; those events remain in the unfiltered result but are
+    # never labelled as a recent golden-cross match.
+    latest_golden_cross_at: list[int | None] = [None] * len(features)
+    last_cross_position: int | None = None
+    if "yellow_mid" in features:
+        for position in range(len(features)):
+            if position > 0:
+                current_white = float(features["white_kernel"].iloc[position])
+                current_yellow = float(features["yellow_mid"].iloc[position])
+                previous_white = float(features["white_kernel"].iloc[position - 1])
+                previous_yellow = float(features["yellow_mid"].iloc[position - 1])
+                pair = (current_white, current_yellow, previous_white, previous_yellow)
+                if (
+                    all(np.isfinite(value) for value in pair)
+                    and previous_white <= previous_yellow
+                    and current_white > current_yellow
+                ):
+                    last_cross_position = position
+            latest_golden_cross_at[position] = last_cross_position
+
     events: list[dict[str, object]] = []
     start = max(0, len(clean) - lookback_bars)
     for position in range(start, len(clean)):
@@ -989,6 +1015,21 @@ def big_black_white_break_events(
             and (breaks_white or near_white)
         ):
             continue
+        golden_cross_position = latest_golden_cross_at[position]
+        golden_cross_age_bars = (
+            position - golden_cross_position
+            if golden_cross_position is not None
+            else None
+        )
+        golden_cross_within_window = bool(
+            golden_cross_age_bars is not None
+            and golden_cross_age_bars < BIG_BLACK_GOLDEN_CROSS_WINDOW_BARS
+        )
+        yellow_line: float | None = None
+        if "yellow_mid" in features:
+            raw_yellow_line = float(features["yellow_mid"].iloc[position])
+            if np.isfinite(raw_yellow_line):
+                yellow_line = round(raw_yellow_line, 8)
         events.append(
             {
                 "position": position,
@@ -999,6 +1040,7 @@ def big_black_white_break_events(
                 "low_price": round(low_price, 8),
                 "close_price": round(close_price, 8),
                 "white_line": round(white_line, 8),
+                "yellow_line": yellow_line,
                 "body_drop_pct": round(body_drop_pct, 4),
                 "lower_wick_range_pct": round(lower_wick_range_pct, 4),
                 "body_range_pct": round(body_range_pct, 4),
@@ -1006,6 +1048,8 @@ def big_black_white_break_events(
                 "breaks_white": breaks_white,
                 "near_white": near_white,
                 "white_relation": "break" if breaks_white else "near",
+                "golden_cross_age_bars": golden_cross_age_bars,
+                "golden_cross_within_50": golden_cross_within_window,
             }
         )
     return events
@@ -2188,6 +2232,7 @@ def collect_signals(
             "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
             "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
             "white_near_pct": BIG_BLACK_WHITE_NEAR_PCT,
+            "golden_cross_window_bars": BIG_BLACK_GOLDEN_CROSS_WINDOW_BARS,
             "scanned_symbols": sum(daily_big_black_scanned_by_market.values()),
             "scanned_by_market": daily_big_black_scanned_by_market,
             "signals": daily_big_black_signals,
@@ -2438,6 +2483,7 @@ def collect_weekly_reclaims(
             "body_min_pct": BIG_BLACK_BODY_MIN_PCT,
             "lower_wick_max_range_pct": BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT,
             "white_near_pct": BIG_BLACK_WHITE_NEAR_PCT,
+            "golden_cross_window_bars": BIG_BLACK_GOLDEN_CROSS_WINDOW_BARS,
             "scanned_symbols": sum(big_black_scanned_by_market.values()),
             "scanned_by_market": big_black_scanned_by_market,
             "signals": big_black_signals,

@@ -1,5 +1,17 @@
 # KJ Long Screener 操作 SOP
 
+## 大黑 K＋白黃金叉 Screener（日線／週線共用）
+
+使用完整檔案 `KJ_Big_Black_White_Golden_Screener.pine`，不需要手動拼接任何程式碼。儲存並加入最愛後，在 TradingView 的 Pine Screener 選擇這支指標，再把「指標時間週期」設為 `1日` 或 `1週` 並重新掃描。
+
+- 全部大黑 K 候選：篩選 `KJ 大黑K近3根 = 1`。
+- 再限定白黃線黃金交叉未滿 50 根：加上 `KJ 金叉後低於50根 = 1`。
+- 只要實體跌破白線：加上 `KJ 實體跌破白線 = 1`。
+- 只要幾乎收最低且貼近白線：加上 `KJ 收最低貼近白線 = 1`。
+- `KJ 訊號當根金叉距離` 記錄的是大黑 K 發生當時的距離；0 代表大黑 K 與黃金交叉同一根，49 仍符合，50 不符合。
+
+手機通知可在自選清單警報選 `KJ 金叉50根內大黑K`，頻率選「每根 K 棒收盤一次」。日線與週線要分開建立警報。
+
 `KJ_Long_Screener.pine` 是 KJ Radar System 的 TradingView 篩選版，只輸出做多條件：
 
 1. 買方 TD Setup 9／Countdown 13。

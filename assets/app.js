@@ -24,6 +24,7 @@ const elements = {
   bigBlackSignals: document.querySelector("#big-black-signals"),
   bigBlackTimeframeFilters: [...document.querySelectorAll("[data-big-black-timeframe]")],
   bigBlackMarketFilters: [...document.querySelectorAll("[data-big-black-market]")],
+  bigBlackGoldenFilters: [...document.querySelectorAll("[data-big-black-golden]")],
   downloadDailyBigBlack: document.querySelector("#download-daily-big-black"),
   downloadWeeklyBigBlack: document.querySelector("#download-weekly-big-black"),
   installApp: document.querySelector("#install-app"),
@@ -58,7 +59,7 @@ const elements = {
 
 let sequentialPayload = null;
 const lineReclaimFilterState = { timeframe: "1d", line: "all", market: "all" };
-const bigBlackFilterState = { timeframe: "1d", market: "all" };
+const bigBlackFilterState = { timeframe: "1d", market: "all", golden: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -674,10 +675,17 @@ function filteredBigBlackSignals(payload, timeframe = bigBlackFilterState.timefr
   const signals = Array.isArray(bigBlackMonitor(payload, timeframe).signals)
     ? bigBlackMonitor(payload, timeframe).signals
     : [];
-  return signals.filter((signal) => (
-    bigBlackFilterState.market === "all"
-    || lineReclaimMarketGroup(signal) === bigBlackFilterState.market
-  ));
+  return signals.filter((signal) => {
+    const marketMatches = (
+      bigBlackFilterState.market === "all"
+      || lineReclaimMarketGroup(signal) === bigBlackFilterState.market
+    );
+    const goldenMatches = (
+      bigBlackFilterState.golden === "all"
+      || signal.golden_cross_within_50 === true
+    );
+    return marketMatches && goldenMatches;
+  });
 }
 
 function exportableBigBlackSignals(payload, timeframe) {
@@ -701,7 +709,9 @@ function exportableBigBlackSignals(payload, timeframe) {
 }
 
 function bigBlackFilterDescription() {
-  return { all: "全部市場", taiwan: "台股", us: "美股", other: "其他" }[bigBlackFilterState.market] || "全部市場";
+  const market = { all: "全部市場", taiwan: "台股", us: "美股", other: "其他" }[bigBlackFilterState.market] || "全部市場";
+  const golden = bigBlackFilterState.golden === "within-50" ? "金叉 < 50 根" : "全部白黃線狀態";
+  return `${market}｜${golden}`;
 }
 
 function updateBigBlackControls(payload) {
@@ -712,6 +722,11 @@ function updateBigBlackControls(payload) {
   }
   for (const button of elements.bigBlackMarketFilters) {
     const active = button.dataset.bigBlackMarket === bigBlackFilterState.market;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  for (const button of elements.bigBlackGoldenFilters) {
+    const active = button.dataset.bigBlackGolden === bigBlackFilterState.golden;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   }
@@ -734,6 +749,11 @@ function makeBigBlackCard(signal) {
   const isWeekly = signal.timeframe_key === "1w";
   const breaksWhite = signal.breaks_white === true || signal.white_relation === "break";
   const relationLabel = breaksWhite ? "實體跌破白線" : "收盤貼近白線";
+  const goldenAgeValue = signal.golden_cross_age_bars;
+  const hasGoldenAge = goldenAgeValue !== null
+    && goldenAgeValue !== undefined
+    && Number.isFinite(Number(goldenAgeValue));
+  const goldenAge = hasGoldenAge ? Number(goldenAgeValue) : null;
   const card = document.createElement("article");
   card.className = "big-black-card";
 
@@ -759,6 +779,12 @@ function makeBigBlackCard(signal) {
     badge.textContent = label;
     badges.append(badge);
   }
+  const goldenBadge = document.createElement("span");
+  goldenBadge.className = signal.golden_cross_within_50 === true ? "golden" : "muted";
+  goldenBadge.textContent = goldenAge === null
+    ? "訊號前無白黃金叉"
+    : `訊號當根：金叉後 ${goldenAge} 根${signal.golden_cross_within_50 === true ? "" : "（≥ 50）"}`;
+  badges.append(goldenBadge);
 
   const metrics = document.createElement("div");
   metrics.className = "big-black-metrics";
@@ -818,8 +844,9 @@ function renderBigBlackBreaks(payload) {
     signal.breaks_white === true || signal.white_relation === "break"
   )).length;
   const nearCount = signals.length - breakCount;
+  const goldenCount = signals.filter((signal) => signal.golden_cross_within_50 === true).length;
   if (elements.bigBlackRelationCount) {
-    elements.bigBlackRelationCount.textContent = `目前顯示：實體跌破白線 ${breakCount} 檔｜收盤貼近白線 ${nearCount} 檔`;
+    elements.bigBlackRelationCount.textContent = `目前顯示：實體跌破白線 ${breakCount} 檔｜收盤貼近白線 ${nearCount} 檔｜金叉 < 50 根 ${goldenCount} 檔`;
   }
   if (signals.length) {
     elements.bigBlackSignals.replaceChildren(...signals.map(makeBigBlackCard));
@@ -2303,6 +2330,12 @@ for (const button of elements.bigBlackTimeframeFilters) {
 for (const button of elements.bigBlackMarketFilters) {
   button.addEventListener("click", () => {
     bigBlackFilterState.market = button.dataset.bigBlackMarket || "all";
+    if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
+  });
+}
+for (const button of elements.bigBlackGoldenFilters) {
+  button.addEventListener("click", () => {
+    bigBlackFilterState.golden = button.dataset.bigBlackGolden || "all";
     if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
   });
 }

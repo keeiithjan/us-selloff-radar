@@ -139,6 +139,57 @@ class DailyLineReclaimTests(unittest.TestCase):
 
         self.assertEqual(events, [])
 
+    def test_big_black_records_golden_cross_age_at_the_signal_bar(self) -> None:
+        frame = base_frame().iloc[:70].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 99.95
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.0
+        cross_position = len(frame) - 1 - 49
+        white = pd.Series(99.0, index=frame.index)
+        yellow = pd.Series(100.0, index=frame.index)
+        white.iloc[cross_position:] = 101.0
+        white.iloc[-1] = 103.0
+        features = pd.DataFrame(
+            {"white_kernel": white, "yellow_mid": yellow},
+            index=frame.index,
+        )
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 8, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["golden_cross_age_bars"], 49)
+        self.assertTrue(events[0]["golden_cross_within_50"])
+        self.assertEqual(events[0]["yellow_line"], 100.0)
+
+    def test_big_black_golden_cross_exactly_fifty_bars_ago_is_excluded(self) -> None:
+        frame = base_frame().iloc[:70].copy()
+        frame.iloc[-1, frame.columns.get_loc("Open")] = 106.0
+        frame.iloc[-1, frame.columns.get_loc("High")] = 106.2
+        frame.iloc[-1, frame.columns.get_loc("Low")] = 99.95
+        frame.iloc[-1, frame.columns.get_loc("Close")] = 100.0
+        cross_position = len(frame) - 1 - 50
+        white = pd.Series(99.0, index=frame.index)
+        yellow = pd.Series(100.0, index=frame.index)
+        white.iloc[cross_position:] = 101.0
+        white.iloc[-1] = 103.0
+        features = pd.DataFrame(
+            {"white_kernel": white, "yellow_mid": yellow},
+            index=frame.index,
+        )
+        daily = next(item for item in TIMEFRAMES if item.key == "1d")
+        now = datetime(2026, 8, 1, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+
+        with patch("sequential.ai_momentum_features", return_value=features):
+            events = big_black_white_break_events(frame, daily, US_SESSION, now)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["golden_cross_age_bars"], 50)
+        self.assertFalse(events[0]["golden_cross_within_50"])
+
     def test_big_black_weekly_excludes_the_unfinished_current_week(self) -> None:
         frame = base_frame().iloc[:8].copy()
         frame.index = pd.date_range("2026-07-13", periods=len(frame), freq="W-MON")

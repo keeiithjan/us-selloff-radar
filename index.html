@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260904-big-black-near2">
+    <link rel="stylesheet" href="assets/styles.css?v=20260904-big-black-golden1">
   </head>
   <body>
     <main class="shell">
@@ -105,7 +105,7 @@
           <div>
             <p class="eyebrow">LARGE BEARISH BODY · WHITE-LINE BREAK</p>
             <h2 id="big-black-title">大黑 K 跌破／貼近白線雷達</h2>
-            <p class="big-black-lede">只收錄已完成 K 棒：黑 K 實體跌幅至少 5%，下引線占整根高低區間小於 10%；同一根實體穿越跌破白線，或收盤距白線在 ±1% 內，皆會列入。日線搜尋最近 3 個交易日；週線搜尋最近 3 根已完成週 K。</p>
+            <p class="big-black-lede">只收錄已完成 K 棒：黑 K 實體跌幅至少 5%，下引線占整根高低區間小於 10%；同一根實體穿越跌破白線，或收盤距白線在 ±1% 內，皆會列入。日線搜尋最近 3 個交易日；週線搜尋最近 3 根已完成週 K。可再限定訊號出現在白線向上穿越黃線後第 0～49 根。</p>
           </div>
           <strong id="big-black-count" class="big-black-count">0</strong>
         </div>
@@ -126,10 +126,21 @@
               <button class="line-reclaim-filter" type="button" data-big-black-market="other" aria-pressed="false">其他</button>
             </div>
           </div>
+          <div class="line-reclaim-filter-group">
+            <span>白黃線</span>
+            <div role="group" aria-label="大黑K白黃線黃金交叉篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-big-black-golden="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter golden" type="button" data-big-black-golden="within-50" aria-pressed="false">金叉 &lt; 50 根</button>
+            </div>
+          </div>
           <div class="big-black-export-actions">
             <button id="download-daily-big-black" class="download-list big-black-download" type="button">一鍵輸出日線清單</button>
             <button id="download-weekly-big-black" class="download-list big-black-download weekly" type="button">一鍵輸出週線清單</button>
           </div>
+        </div>
+        <div class="big-black-pine-links" aria-label="大黑K Pine Screener 完整代碼">
+          <a href="tradingview/KJ_Big_Black_White_Golden_Screener.pine" download>下載完整 Pine Screener</a>
+          <span>同一份指標可在 Pine Screener 的「指標時間週期」選 1日 或 1週。</span>
         </div>
         <div class="big-black-summary" aria-live="polite">
           <p id="big-black-updated">正在讀取大黑 K 訊號…</p>
@@ -297,6 +308,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260904-big-black-near2"></script>
+    <script src="assets/app.js?v=20260904-big-black-golden1"></script>
   </body>
 </html>

@@ -97,6 +97,8 @@ const payload = {
           market: "美股",
           bars_ago: 0,
           body_drop_pct: 6.2,
+          golden_cross_age_bars: 12,
+          golden_cross_within_50: true,
         },
         {
           symbol: "2330",
@@ -104,6 +106,8 @@ const payload = {
           market: "台股",
           bars_ago: 2,
           body_drop_pct: 5.4,
+          golden_cross_age_bars: 61,
+          golden_cross_within_50: false,
         },
       ],
     },
@@ -126,6 +130,8 @@ const payload = {
         market: "美股",
         bars_ago: 1,
         body_drop_pct: 5.8,
+        golden_cross_age_bars: 4,
+        golden_cross_within_50: true,
       }],
     },
   },
@@ -185,6 +191,21 @@ const usDailyBigBlack = vm.runInContext(
 );
 assert.deepEqual([...usDailyBigBlack], ["NASDAQ:AAA"]);
 
+vm.runInContext('bigBlackFilterState.market = "all"; bigBlackFilterState.golden = "within-50"', context);
+const goldenDailyBigBlack = vm.runInContext(
+  'exportableBigBlackSignals(testPayload, "1d").map(tradingViewImportSymbol)',
+  context,
+);
+assert.deepEqual([...goldenDailyBigBlack], ["NASDAQ:AAA"]);
+
+const goldenWeeklyBigBlack = vm.runInContext(
+  'exportableBigBlackSignals(testPayload, "1w").map(tradingViewImportSymbol)',
+  context,
+);
+assert.deepEqual([...goldenWeeklyBigBlack], ["NASDAQ:MSFT"]);
+
+vm.runInContext('bigBlackFilterState.golden = "all"', context);
+
 context.testCardSignal = {
   symbol: "2330",
   exchange: "TWSE",
@@ -226,6 +247,8 @@ context.testBigBlackCardSignal = {
   breaks_white: true,
   near_white: false,
   white_relation: "break",
+  golden_cross_age_bars: 12,
+  golden_cross_within_50: true,
   first_shown_at_utc: "2026-09-03T01:02:03Z",
 };
 const bigBlackCard = vm.runInContext(
@@ -237,6 +260,7 @@ assert.match(cardText(bigBlackCard), /實體跌破白線/);
 assert.match(cardText(bigBlackCard), /實體跌幅 -5\.66%/);
 assert.match(cardText(bigBlackCard), /下引線 < 10%/);
 assert.match(cardText(bigBlackCard), /收盤距白線 -2\.91%/);
+assert.match(cardText(bigBlackCard), /訊號當根：金叉後 12 根/);
 assert.match(cardText(bigBlackCard), /首次顯示：2026\/09\/03\s+09:02:03/);
 
 context.testNearWhiteCardSignal = {
@@ -249,6 +273,8 @@ context.testNearWhiteCardSignal = {
   breaks_white: false,
   near_white: true,
   white_relation: "near",
+  golden_cross_age_bars: 50,
+  golden_cross_within_50: false,
 };
 const nearWhiteCard = vm.runInContext(
   'makeBigBlackCard(testNearWhiteCardSignal)',
@@ -256,5 +282,6 @@ const nearWhiteCard = vm.runInContext(
 );
 assert.match(cardText(nearWhiteCard), /收盤貼近白線/);
 assert.match(cardText(nearWhiteCard), /未穿越白線，但收盤距白線 \+0\.50%/);
+assert.match(cardText(nearWhiteCard), /金叉後 50 根（≥ 50）/);
 
 console.log("line reclaim export tests passed");
