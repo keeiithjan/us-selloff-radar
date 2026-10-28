@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20260904-big-black-golden1">
+    <link rel="stylesheet" href="assets/styles.css?v=20261028-ema-ribbon1">
   </head>
   <body>
     <main class="shell">
@@ -150,6 +150,44 @@
         </div>
         <div id="big-black-signals" class="big-black-signals" aria-live="polite">
           <p class="line-reclaim-empty">正在同步最近 3 根已完成 K 棒…</p>
+        </div>
+      </section>
+
+      <section class="ema-ribbon-command" aria-labelledby="ema-ribbon-title">
+        <div class="ema-ribbon-head">
+          <div>
+            <p class="eyebrow">EMA 9 · 21 · 50 · 150 · 200</p>
+            <h2 id="ema-ribbon-title">五線低乖離 → 多頭擴展雷達</h2>
+            <p class="ema-ribbon-lede">日線五條 EMA 最近 60 根曾壓縮至 3% 內，現在連續 3 根維持 9 &gt; 21 &gt; 50 &gt; 150 &gt; 200，並與 5 根前相比至少三組相鄰線距正在擴大。若前一日黑 K 實體跌破 EMA9／21，而隔日開盤高於前一日 EMA9，會列為最高優先。</p>
+          </div>
+          <strong id="ema-ribbon-count" class="ema-ribbon-count">0</strong>
+        </div>
+        <div class="ema-ribbon-toolbar">
+          <div class="line-reclaim-filter-group">
+            <span>階段</span>
+            <div role="group" aria-label="EMA 訊號階段篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-ema-stage="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter ema-priority" type="button" data-ema-stage="open_reclaim" aria-pressed="false">開盤站回</button>
+              <button class="line-reclaim-filter" type="button" data-ema-stage="expansion_watch" aria-pressed="false">擴展觀察</button>
+            </div>
+          </div>
+          <div class="line-reclaim-filter-group">
+            <span>市場</span>
+            <div role="group" aria-label="EMA 市場篩選">
+              <button class="line-reclaim-filter is-active" type="button" data-ema-market="all" aria-pressed="true">全部</button>
+              <button class="line-reclaim-filter" type="button" data-ema-market="taiwan" aria-pressed="false">台股</button>
+              <button class="line-reclaim-filter" type="button" data-ema-market="us" aria-pressed="false">美股</button>
+              <button class="line-reclaim-filter" type="button" data-ema-market="other" aria-pressed="false">其他</button>
+            </div>
+          </div>
+          <a class="download-list ema-ribbon-download" href="data/KJ-EMA-Ribbon-Expansion.TXT" download>下載 TradingView 清單</a>
+        </div>
+        <div class="ema-ribbon-summary" aria-live="polite">
+          <p id="ema-ribbon-updated">正在讀取五線訊號…</p>
+          <p id="ema-ribbon-scan-count">等待掃描資料</p>
+        </div>
+        <div id="ema-ribbon-signals" class="ema-ribbon-signals" aria-live="polite">
+          <p class="line-reclaim-empty">正在同步五線壓縮與多頭擴展訊號…</p>
         </div>
       </section>
 
@@ -308,6 +346,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20260904-big-black-golden1"></script>
+    <script src="assets/app.js?v=20261028-ema-ribbon1"></script>
   </body>
 </html>

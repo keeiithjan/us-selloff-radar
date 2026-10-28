@@ -28,6 +28,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
+from ema_ribbon import EmaRibbonSettings, ema_ribbon_signal
 from scanner import NEW_YORK, Symbol, chunks, frame_for_symbol, is_regular_session, load_symbols
 
 
@@ -43,6 +44,7 @@ TAIWAN_PINE_SCREENER_FILE = ROOT / "data" / "KJ-Taiwan-Pine-Screener-Universe.TX
 BINANCE_CRYPTO_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Crypto-Perpetuals.TXT"
 BINANCE_STOCK_PERPETUALS_FILE = ROOT / "data" / "KJ-Binance-Stock-Perpetuals.TXT"
 PEPPERSTONE_CFD_FILE = ROOT / "data" / "KJ-Pepperstone-Liquid-CFDs.TXT"
+EMA_RIBBON_EXPORT_FILE = ROOT / "data" / "KJ-EMA-Ribbon-Expansion.TXT"
 SYMBOLS_FILE = ROOT / "symbols.csv"
 TAIPEI = ZoneInfo("Asia/Taipei")
 UTC = timezone.utc
@@ -185,6 +187,7 @@ BIG_BLACK_LOWER_WICK_MAX_RANGE_PCT = 10.0
 BIG_BLACK_WHITE_NEAR_PCT = 1.0
 BIG_BLACK_LOOKBACK_BARS = 3
 BIG_BLACK_GOLDEN_CROSS_WINDOW_BARS = 50
+EMA_RIBBON_SETTINGS = EmaRibbonSettings()
 
 # AI Momentum [YinYang] defaults supplied by the user.  These reproduce the
 # non-repainting rational-quadratic zones used for the 15-minute and hourly
@@ -2007,12 +2010,45 @@ def collect_signals(
     daily_line_scanned_by_market: dict[str, int] = {}
     daily_big_black_signals: list[dict[str, object]] = []
     daily_big_black_scanned_by_market: dict[str, int] = {}
+    ema_ribbon_signals: list[dict[str, object]] = []
+    ema_ribbon_scanned_by_market: dict[str, int] = {}
     taiwan_universe: dict[str, dict[str, str]] = {}
     scanned_by_market: dict[str, int] = {}
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
     for instrument, raw in records:
         if timeframe.key == "1d" and not raw.empty:
+            ema_ribbon_scanned_by_market[instrument.market] = (
+                ema_ribbon_scanned_by_market.get(instrument.market, 0) + 1
+            )
+            ema_event = ema_ribbon_signal(raw, EMA_RIBBON_SETTINGS)
+            if ema_event is not None:
+                event_index = raw.index[-1]
+                product_category = product_category_for(instrument, public_profile_cache)
+                tradingview_symbol = tradingview_symbol_for(instrument)
+                bar_date = pd.Timestamp(event_index)
+                if bar_date.tzinfo is not None:
+                    bar_date = bar_date.tz_convert(instrument.session.timezone)
+                ema_ribbon_signals.append(
+                    {
+                        "signal_id": f"ema-ribbon:1d:{tradingview_symbol}:{bar_date.date().isoformat()}",
+                        "signal_type": "ema_ribbon_expansion",
+                        "timeframe_key": "1d",
+                        "symbol": instrument.symbol,
+                        "name": instrument.name,
+                        "industry": instrument.industry,
+                        "product_category": product_category,
+                        "exchange": instrument.exchange,
+                        "tradingview_symbol": tradingview_symbol,
+                        "market": instrument.market,
+                        "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
+                        "is_current_daily_bar": is_current_daily_bar(
+                            event_index, instrument.session, now
+                        ),
+                        **ema_event,
+                    }
+                )
             daily_line_scanned_by_market[instrument.market] = (
                 daily_line_scanned_by_market.get(instrument.market, 0) + 1
             )
@@ -2212,6 +2248,15 @@ def collect_signals(
             str(item.get("tradingview_symbol") or ""),
         )
     )
+    ema_ribbon_signals.sort(
+        key=lambda item: (
+            item.get("stage") != "open_reclaim",
+            -float(item.get("expansion_score") or 0),
+            float(item.get("compression_pct") or 999),
+            str(item.get("market") or ""),
+            str(item.get("tradingview_symbol") or ""),
+        )
+    )
     return {
         "key": timeframe.key,
         "label": timeframe.label,
@@ -2236,6 +2281,12 @@ def collect_signals(
             "scanned_symbols": sum(daily_big_black_scanned_by_market.values()),
             "scanned_by_market": daily_big_black_scanned_by_market,
             "signals": daily_big_black_signals,
+        },
+        "ema_ribbon_expansion": {
+            "settings": EMA_RIBBON_SETTINGS.as_dict(),
+            "scanned_symbols": sum(ema_ribbon_scanned_by_market.values()),
+            "scanned_by_market": ema_ribbon_scanned_by_market,
+            "signals": ema_ribbon_signals,
         },
         "taiwan_pine_screener_universe": sorted(
             taiwan_universe.values(),
@@ -2552,6 +2603,35 @@ def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
     ]
 
 
+def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[str]:
+    """Return EMA signals with opening reclaims first and no duplicates."""
+    market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3}
+    entries: dict[str, dict[str, object]] = {}
+    for frame in frame_list:
+        if not isinstance(frame, dict) or frame.get("key") != "1d":
+            continue
+        monitor = frame.get("ema_ribbon_expansion", {})
+        signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
+        for signal in signals if isinstance(signals, list) else []:
+            if not isinstance(signal, dict):
+                continue
+            symbol = str(signal.get("tradingview_symbol") or "").strip()
+            if symbol:
+                entries[symbol] = signal
+    return [
+        symbol
+        for symbol, _ in sorted(
+            entries.items(),
+            key=lambda item: (
+                item[1].get("stage") != "open_reclaim",
+                -float(item[1].get("expansion_score") or 0),
+                market_order.get(str(item[1].get("market") or ""), 99),
+                item[0],
+            ),
+        )
+    ]
+
+
 def line_reclaim_signal_lists(payload: dict[str, object]) -> list[list[dict[str, object]]]:
     """Return all website-card signal lists that persist first-show times."""
     lists: list[list[dict[str, object]]] = []
@@ -2692,6 +2772,11 @@ def write_payload(
     weekly_symbols = weekly_reclaim_export_symbols(weekly_reclaim)
     WEEKLY_RECLAIM_EXPORT_FILE.write_text(
         "\n".join(weekly_symbols) + ("\n" if weekly_symbols else ""),
+        encoding="utf-8",
+    )
+    ema_ribbon_symbols = ema_ribbon_export_symbols(frame_list)
+    EMA_RIBBON_EXPORT_FILE.write_text(
+        "\n".join(ema_ribbon_symbols) + ("\n" if ema_ribbon_symbols else ""),
         encoding="utf-8",
     )
     # A stable Taiwan universe for Pine Screener. Unlike the TD export above,

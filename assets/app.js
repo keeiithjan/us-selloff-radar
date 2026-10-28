@@ -27,6 +27,12 @@ const elements = {
   bigBlackGoldenFilters: [...document.querySelectorAll("[data-big-black-golden]")],
   downloadDailyBigBlack: document.querySelector("#download-daily-big-black"),
   downloadWeeklyBigBlack: document.querySelector("#download-weekly-big-black"),
+  emaRibbonCount: document.querySelector("#ema-ribbon-count"),
+  emaRibbonUpdated: document.querySelector("#ema-ribbon-updated"),
+  emaRibbonScanCount: document.querySelector("#ema-ribbon-scan-count"),
+  emaRibbonSignals: document.querySelector("#ema-ribbon-signals"),
+  emaRibbonStageFilters: [...document.querySelectorAll("[data-ema-stage]")],
+  emaRibbonMarketFilters: [...document.querySelectorAll("[data-ema-market]")],
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
   systemStatus: document.querySelector("#system-status"),
@@ -60,6 +66,7 @@ const elements = {
 let sequentialPayload = null;
 const lineReclaimFilterState = { timeframe: "1d", line: "all", market: "all" };
 const bigBlackFilterState = { timeframe: "1d", market: "all", golden: "all" };
+const emaRibbonFilterState = { stage: "all", market: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -2134,11 +2141,107 @@ function makeTimeframe(frame) {
   return panel;
 }
 
+function emaRibbonMonitor(payload) {
+  const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
+  const daily = frames.find((frame) => frame?.key === "1d");
+  return daily?.ema_ribbon_expansion || {};
+}
+
+function emaRibbonCard(signal) {
+  const priority = signal.stage === "open_reclaim";
+  const card = document.createElement("article");
+  card.className = `ema-ribbon-card${priority ? " is-priority" : ""}`;
+
+  const header = document.createElement("div");
+  header.className = "ema-ribbon-card-head";
+  const identity = document.createElement("div");
+  const symbol = document.createElement("strong");
+  symbol.textContent = signal.symbol || "—";
+  const name = document.createElement("span");
+  name.textContent = signal.name && signal.name !== signal.symbol ? signal.name : displayMarket(signal.market);
+  identity.append(symbol, name);
+  const badge = document.createElement("span");
+  badge.className = `ema-ribbon-stage${priority ? " priority" : ""}`;
+  badge.textContent = priority ? "隔日開盤站回" : "五線多頭擴展";
+  header.append(identity, badge, makeTradingViewLink(signal, "D"));
+
+  const category = document.createElement("p");
+  category.className = "ema-ribbon-category";
+  category.textContent = industryText(signal);
+
+  const metrics = document.createElement("div");
+  metrics.className = "ema-ribbon-metrics";
+  const metricValues = [
+    ["最低乖離", `${Number(signal.compression_pct || 0).toFixed(2)}%`],
+    ["目前展開", `${Number(signal.current_spread_pct || 0).toFixed(2)}%`],
+    ["擴大線距", `${Number(signal.expanding_gap_count || 0)} / 4`],
+    ["擴展分數", `${Number(signal.expansion_score || 0).toFixed(0)}`],
+  ];
+  for (const [label, value] of metricValues) {
+    const metric = document.createElement("div");
+    metric.append(...makeTextPair(label, value));
+    metrics.append(metric);
+  }
+
+  const rule = document.createElement("p");
+  rule.className = "ema-ribbon-rule";
+  if (priority) {
+    const lines = (Array.isArray(signal.fast_break_lines) ? signal.fast_break_lines : [])
+      .map((line) => `EMA${line}`).join("＋");
+    rule.textContent = `前一日黑 K 實體跌破 ${lines || "快線"}；今日開盤 ${Number(signal.current_open || 0).toFixed(2)} 高於前日 EMA9 ${Number(signal.previous_ema9 || 0).toFixed(2)}。`;
+  } else {
+    rule.textContent = `五線多頭排列已連續 ${Number(signal.alignment_bars || 0)} 根，總乖離與相鄰線距正同步擴大。`;
+  }
+
+  const footer = document.createElement("p");
+  footer.className = "ema-ribbon-footer";
+  footer.textContent = `${displayMarket(signal.market)} · ${signal.bar_time_et || "最新日線"} · 現價 ${formatSignalPrice(signal)}`;
+  card.append(header, category, metrics, rule, footer);
+  return card;
+}
+
+function renderEmaRibbon(payload) {
+  if (!elements.emaRibbonSignals) return;
+  const monitor = emaRibbonMonitor(payload);
+  const allSignals = Array.isArray(monitor.signals) ? monitor.signals : [];
+  const signals = allSignals.filter((signal) => (
+    (emaRibbonFilterState.stage === "all" || signal.stage === emaRibbonFilterState.stage)
+    && (emaRibbonFilterState.market === "all" || lineReclaimMarketGroup(signal) === emaRibbonFilterState.market)
+  ));
+  for (const button of elements.emaRibbonStageFilters) {
+    const active = button.dataset.emaStage === emaRibbonFilterState.stage;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  for (const button of elements.emaRibbonMarketFilters) {
+    const active = button.dataset.emaMarket === emaRibbonFilterState.market;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  elements.emaRibbonCount.textContent = String(signals.length);
+  elements.emaRibbonUpdated.textContent = payload?.updated_at_utc
+    ? `資料更新：${formatTaipei(payload.updated_at_utc)}`
+    : "等待首次資料更新";
+  const markets = Object.entries(monitor.scanned_by_market || {})
+    .map(([market, count]) => `${displayMarket(market)} ${count} 檔`)
+    .join("、");
+  elements.emaRibbonScanCount.textContent = `已掃描 ${Number(monitor.scanned_symbols || 0)} 檔${markets ? `（${markets}）` : ""}`;
+  if (!signals.length) {
+    const empty = document.createElement("p");
+    empty.className = "line-reclaim-empty";
+    empty.textContent = "目前篩選範圍沒有同時通過五線壓縮、多頭排列與擴展條件的標的。";
+    elements.emaRibbonSignals.replaceChildren(empty);
+    return;
+  }
+  elements.emaRibbonSignals.replaceChildren(...signals.map(emaRibbonCard));
+}
+
 function renderSequential(payload) {
   sequentialPayload = payload;
   const frames = Array.isArray(payload.timeframes) ? payload.timeframes : [];
   renderDailyLineReclaims(payload);
   renderBigBlackBreaks(payload);
+  renderEmaRibbon(payload);
   elements.sequentialFrames.replaceChildren(...frames.map(makeTimeframe));
   renderTrendReclaims(frames);
   renderWeeklyReclaims(payload);
@@ -2337,6 +2440,18 @@ for (const button of elements.bigBlackGoldenFilters) {
   button.addEventListener("click", () => {
     bigBlackFilterState.golden = button.dataset.bigBlackGolden || "all";
     if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
+  });
+}
+for (const button of elements.emaRibbonStageFilters) {
+  button.addEventListener("click", () => {
+    emaRibbonFilterState.stage = button.dataset.emaStage || "all";
+    if (sequentialPayload) renderEmaRibbon(sequentialPayload);
+  });
+}
+for (const button of elements.emaRibbonMarketFilters) {
+  button.addEventListener("click", () => {
+    emaRibbonFilterState.market = button.dataset.emaMarket || "all";
+    if (sequentialPayload) renderEmaRibbon(sequentialPayload);
   });
 }
 elements.downloadTradingViewList.addEventListener("click", downloadTradingViewList);

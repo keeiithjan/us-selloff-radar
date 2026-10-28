@@ -1,16 +1,20 @@
 // Bump whenever the HTML references a new interface bundle.  Without this,
 // installed PWAs can keep serving an older cached shell even after Pages has
 // deployed the new weekly filters.
-const CACHE_NAME = "kj-radar-shell-v29";
+const CACHE_NAME = "kj-radar-shell-v30";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./assets/styles.css?v=20260904-big-black-golden1",
-  "./assets/app.js?v=20260904-big-black-golden1",
+  "./assets/styles.css?v=20261028-ema-ribbon1",
+  "./assets/app.js?v=20261028-ema-ribbon1",
   "./assets/kj-radar-icon.svg",
 ];
-const LIVE_DATA_SUFFIXES = ["/data/sequential.json", "/data/market.json"];
+const LIVE_DATA_SUFFIXES = [
+  "/data/sequential.json",
+  "/data/market.json",
+  "/data/KJ-EMA-Ribbon-Expansion.TXT",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
