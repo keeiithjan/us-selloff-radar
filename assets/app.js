@@ -31,7 +31,6 @@ const elements = {
   emaRibbonUpdated: document.querySelector("#ema-ribbon-updated"),
   emaRibbonScanCount: document.querySelector("#ema-ribbon-scan-count"),
   emaRibbonSignals: document.querySelector("#ema-ribbon-signals"),
-  emaRibbonStageFilters: [...document.querySelectorAll("[data-ema-stage]")],
   emaRibbonMarketFilters: [...document.querySelectorAll("[data-ema-market]")],
   installApp: document.querySelector("#install-app"),
   installAppNote: document.querySelector("#install-app-note"),
@@ -66,7 +65,7 @@ const elements = {
 let sequentialPayload = null;
 const lineReclaimFilterState = { timeframe: "1d", line: "all", market: "all" };
 const bigBlackFilterState = { timeframe: "1d", market: "all", golden: "all" };
-const emaRibbonFilterState = { stage: "all", market: "all" };
+const emaRibbonFilterState = { market: "all" };
 let marketUpdatedAt = null;
 let marketAgeTimer = null;
 let deferredInstallPrompt = null;
@@ -2148,9 +2147,8 @@ function emaRibbonMonitor(payload) {
 }
 
 function emaRibbonCard(signal) {
-  const priority = signal.stage === "open_reclaim";
   const card = document.createElement("article");
-  card.className = `ema-ribbon-card${priority ? " is-priority" : ""}`;
+  card.className = "ema-ribbon-card is-priority";
 
   const header = document.createElement("div");
   header.className = "ema-ribbon-card-head";
@@ -2161,8 +2159,8 @@ function emaRibbonCard(signal) {
   name.textContent = signal.name && signal.name !== signal.symbol ? signal.name : displayMarket(signal.market);
   identity.append(symbol, name);
   const badge = document.createElement("span");
-  badge.className = `ema-ribbon-stage${priority ? " priority" : ""}`;
-  badge.textContent = priority ? "隔日開盤站回" : "五線多頭擴展";
+  badge.className = "ema-ribbon-stage priority";
+  badge.textContent = "實體跌破後開盤站回";
   header.append(identity, badge, makeTradingViewLink(signal, "D"));
 
   const category = document.createElement("p");
@@ -2173,9 +2171,9 @@ function emaRibbonCard(signal) {
   metrics.className = "ema-ribbon-metrics";
   const metricValues = [
     ["最低乖離", `${Number(signal.compression_pct || 0).toFixed(2)}%`],
-    ["目前展開", `${Number(signal.current_spread_pct || 0).toFixed(2)}%`],
-    ["擴大線距", `${Number(signal.expanding_gap_count || 0)} / 4`],
-    ["擴展分數", `${Number(signal.expansion_score || 0).toFixed(0)}`],
+    ["目前乖離", `${Number(signal.current_spread_pct || 0).toFixed(2)}%`],
+    ["實際連續", `${Number(signal.alignment_streak || 0)} 根`],
+    ["距交纏", `${Number(signal.compression_bars_ago || 0)} 根`],
   ];
   for (const [label, value] of metricValues) {
     const metric = document.createElement("div");
@@ -2185,13 +2183,9 @@ function emaRibbonCard(signal) {
 
   const rule = document.createElement("p");
   rule.className = "ema-ribbon-rule";
-  if (priority) {
-    const lines = (Array.isArray(signal.fast_break_lines) ? signal.fast_break_lines : [])
-      .map((line) => `EMA${line}`).join("＋");
-    rule.textContent = `前一日黑 K 實體跌破 ${lines || "快線"}；今日開盤 ${Number(signal.current_open || 0).toFixed(2)} 高於前日 EMA9 ${Number(signal.previous_ema9 || 0).toFixed(2)}。`;
-  } else {
-    rule.textContent = `五線多頭排列已連續 ${Number(signal.alignment_bars || 0)} 根，總乖離與相鄰線距正同步擴大。`;
-  }
+  const lines = (Array.isArray(signal.fast_break_lines) ? signal.fast_break_lines : [])
+    .map((line) => `EMA${line}`).join("＋");
+  rule.textContent = `前一日黑 K 實體跌破 ${lines || "快線"}；今日開盤 ${Number(signal.current_open || 0).toFixed(2)} 高於前日 EMA9 ${Number(signal.previous_ema9 || 0).toFixed(2)}。`;
 
   const footer = document.createElement("p");
   footer.className = "ema-ribbon-footer";
@@ -2205,14 +2199,9 @@ function renderEmaRibbon(payload) {
   const monitor = emaRibbonMonitor(payload);
   const allSignals = Array.isArray(monitor.signals) ? monitor.signals : [];
   const signals = allSignals.filter((signal) => (
-    (emaRibbonFilterState.stage === "all" || signal.stage === emaRibbonFilterState.stage)
+    signal.stage === "open_reclaim"
     && (emaRibbonFilterState.market === "all" || lineReclaimMarketGroup(signal) === emaRibbonFilterState.market)
   ));
-  for (const button of elements.emaRibbonStageFilters) {
-    const active = button.dataset.emaStage === emaRibbonFilterState.stage;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  }
   for (const button of elements.emaRibbonMarketFilters) {
     const active = button.dataset.emaMarket === emaRibbonFilterState.market;
     button.classList.toggle("is-active", active);
@@ -2229,7 +2218,7 @@ function renderEmaRibbon(payload) {
   if (!signals.length) {
     const empty = document.createElement("p");
     empty.className = "line-reclaim-empty";
-    empty.textContent = "目前篩選範圍沒有同時通過五線壓縮、多頭排列與擴展條件的標的。";
+    empty.textContent = "目前沒有同時通過五線交纏、受控乖離、快線實體跌破與隔日開盤站回的標的。";
     elements.emaRibbonSignals.replaceChildren(empty);
     return;
   }
@@ -2440,12 +2429,6 @@ for (const button of elements.bigBlackGoldenFilters) {
   button.addEventListener("click", () => {
     bigBlackFilterState.golden = button.dataset.bigBlackGolden || "all";
     if (sequentialPayload) renderBigBlackBreaks(sequentialPayload);
-  });
-}
-for (const button of elements.emaRibbonStageFilters) {
-  button.addEventListener("click", () => {
-    emaRibbonFilterState.stage = button.dataset.emaStage || "all";
-    if (sequentialPayload) renderEmaRibbon(sequentialPayload);
   });
 }
 for (const button of elements.emaRibbonMarketFilters) {

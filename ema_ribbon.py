@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure daily EMA ribbon compression and bullish-expansion detector."""
+"""Daily EMA-ribbon compression, fast-line break, and open-reclaim detector."""
 
 from __future__ import annotations
 
@@ -15,7 +15,10 @@ EMA_LENGTHS = (9, 21, 50, 150, 200)
 class EmaRibbonSettings:
     compression_threshold_pct: float = 3.0
     compression_lookback_bars: int = 60
-    alignment_bars: int = 3
+    maximum_compression_age_bars: int = 20
+    minimum_alignment_bars: int = 3
+    maximum_alignment_bars: int = 15
+    maximum_current_spread_pct: float = 6.0
     expansion_compare_bars: int = 5
     minimum_expanding_gaps: int = 3
     minimum_bars: int = 220
@@ -66,7 +69,7 @@ def ema_ribbon_signal(
     required = max(
         settings.minimum_bars,
         settings.compression_lookback_bars + 2,
-        settings.alignment_bars,
+        settings.minimum_alignment_bars,
         settings.expansion_compare_bars + 1,
     )
     if len(features) < required:
@@ -78,12 +81,30 @@ def ema_ribbon_signal(
     prior_window = features["ema_spread_pct"].iloc[
         -1 - settings.compression_lookback_bars : -1
     ]
+    compressed = prior_window <= settings.compression_threshold_pct
+    if not bool(compressed.any()):
+        return None
     compression_pct = float(prior_window.min())
-    if compression_pct > settings.compression_threshold_pct:
+    latest_compression_index = compressed[compressed].index[-1]
+    latest_compression_position = features.index.get_loc(latest_compression_index)
+    if not isinstance(latest_compression_position, int):
+        return None
+    compression_bars_ago = len(features) - 1 - latest_compression_position
+    if compression_bars_ago > settings.maximum_compression_age_bars:
         return None
 
-    aligned_window = features["bullish_aligned"].iloc[-settings.alignment_bars :]
-    if not bool(aligned_window.all()):
+    alignment_streak = 0
+    for aligned in reversed(features["bullish_aligned"].tolist()):
+        if not bool(aligned):
+            break
+        alignment_streak += 1
+    if not (
+        settings.minimum_alignment_bars
+        <= alignment_streak
+        <= settings.maximum_alignment_bars
+    ):
+        return None
+    if float(latest["ema_spread_pct"]) > settings.maximum_current_spread_pct:
         return None
 
     gap_columns = [
@@ -117,11 +138,8 @@ def ema_ribbon_signal(
     current_open = float(latest["Open"])
     previous_ema9 = float(previous["ema9"])
     open_above_previous_ema9 = current_open > previous_ema9
-    stage = (
-        "open_reclaim"
-        if fast_break_lines and open_above_previous_ema9
-        else "expansion_watch"
-    )
+    if not fast_break_lines or not open_above_previous_ema9:
+        return None
 
     gap_growth_pct = 0.0
     for column in gap_columns:
@@ -131,14 +149,15 @@ def ema_ribbon_signal(
     expansion_score = max(0.0, min(100.0, gap_growth_pct / len(gap_columns)))
 
     return {
-        "stage": stage,
+        "stage": "open_reclaim",
         "ema_lengths": list(EMA_LENGTHS),
         "compression_pct": round(compression_pct, 4),
+        "compression_bars_ago": compression_bars_ago,
         "current_spread_pct": round(float(latest["ema_spread_pct"]), 4),
         "spread_compare_bars": settings.expansion_compare_bars,
         "expanding_gap_count": expanding_gap_count,
         "gap_expansion": gap_expansion,
-        "alignment_bars": settings.alignment_bars,
+        "alignment_streak": alignment_streak,
         "fast_break_lines": fast_break_lines,
         "open_above_previous_ema9": open_above_previous_ema9,
         "current_open": round(current_open, 8),

@@ -15,14 +15,19 @@ class EmaRibbonUiContractTests(unittest.TestCase):
         service_worker = (ROOT / "sw.js").read_text(encoding="utf-8")
 
         self.assertIn('id="ema-ribbon-signals"', index_html)
-        self.assertIn('data-ema-stage="open_reclaim"', index_html)
+        self.assertNotIn('data-ema-stage=', index_html)
+        self.assertNotIn("expansion_watch", index_html)
         self.assertIn("data/KJ-EMA-Ribbon-Expansion.TXT", index_html)
         self.assertIn("function renderEmaRibbon(payload)", app_js)
         self.assertIn("renderEmaRibbon(payload);", app_js)
+        self.assertIn("signal.alignment_streak", app_js)
+        self.assertIn("signal.compression_bars_ago", app_js)
+        self.assertIn("實際連續", app_js)
+        self.assertIn("距交纏", app_js)
         self.assertIn(".ema-ribbon-card.is-priority", styles)
-        self.assertIn("kj-radar-shell-v30", service_worker)
-        self.assertIn("20261028-ema-ribbon1", index_html)
-        self.assertIn("20261028-ema-ribbon1", service_worker)
+        self.assertIn("kj-radar-shell-v31", service_worker)
+        self.assertIn("20261028-ema-reclaim2", index_html)
+        self.assertIn("20261028-ema-reclaim2", service_worker)
 
 
 if __name__ == "__main__":

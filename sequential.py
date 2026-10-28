@@ -2250,9 +2250,9 @@ def collect_signals(
     )
     ema_ribbon_signals.sort(
         key=lambda item: (
-            item.get("stage") != "open_reclaim",
+            float(item.get("current_spread_pct") or 999),
+            int(item.get("compression_bars_ago") or 999),
             -float(item.get("expansion_score") or 0),
-            float(item.get("compression_pct") or 999),
             str(item.get("market") or ""),
             str(item.get("tradingview_symbol") or ""),
         )
@@ -2604,7 +2604,7 @@ def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
 
 
 def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[str]:
-    """Return EMA signals with opening reclaims first and no duplicates."""
+    """Return only qualified EMA opening-reclaim signals without duplicates."""
     market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3}
     entries: dict[str, dict[str, object]] = {}
     for frame in frame_list:
@@ -2613,7 +2613,7 @@ def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[s
         monitor = frame.get("ema_ribbon_expansion", {})
         signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
         for signal in signals if isinstance(signals, list) else []:
-            if not isinstance(signal, dict):
+            if not isinstance(signal, dict) or signal.get("stage") != "open_reclaim":
                 continue
             symbol = str(signal.get("tradingview_symbol") or "").strip()
             if symbol:
@@ -2623,7 +2623,8 @@ def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[s
         for symbol, _ in sorted(
             entries.items(),
             key=lambda item: (
-                item[1].get("stage") != "open_reclaim",
+                float(item[1].get("current_spread_pct") or 999),
+                int(item[1].get("compression_bars_ago") or 999),
                 -float(item[1].get("expansion_score") or 0),
                 market_order.get(str(item[1].get("market") or ""), 99),
                 item[0],
