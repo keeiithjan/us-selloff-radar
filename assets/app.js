@@ -1,4 +1,5 @@
 const elements = {
+  modeSelector: document.querySelector("#mode-selector"),
   refresh: document.querySelector("#refresh"),
   enableLineAlerts: document.querySelector("#enable-line-alerts"),
   lineReclaimUpdated: document.querySelector("#line-reclaim-updated"),
@@ -80,6 +81,51 @@ const motionState = {
   movers: new Map(),
   hasMarket: false,
 };
+let modeSelectorUpdateQueued = false;
+
+function modeTargets() {
+  if (!elements.modeSelector) return [];
+  return Array.from(elements.modeSelector.options || [])
+    .map((option) => document.getElementById(option.value))
+    .filter(Boolean);
+}
+
+function navigateToMode(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+  window.history.replaceState(null, "", `#${targetId}`);
+}
+
+function syncModeSelectorToScroll() {
+  if (!elements.modeSelector) return;
+  const targets = modeTargets();
+  if (!targets.length) return;
+  let active = targets[0];
+  for (const target of targets) {
+    if (target.getBoundingClientRect().top <= 110) active = target;
+    else break;
+  }
+  elements.modeSelector.value = active.id;
+}
+
+function configureModeSelector() {
+  if (!elements.modeSelector) return;
+  const targetIds = new Set(modeTargets().map((target) => target.id));
+  if (!targetIds.size) return;
+  const initialHash = window.location.hash.slice(1);
+  if (targetIds.has(initialHash)) elements.modeSelector.value = initialHash;
+  elements.modeSelector.addEventListener("change", () => navigateToMode(elements.modeSelector.value));
+  window.addEventListener("scroll", () => {
+    if (modeSelectorUpdateQueued) return;
+    modeSelectorUpdateQueued = true;
+    window.requestAnimationFrame(() => {
+      syncModeSelectorToScroll();
+      modeSelectorUpdateQueued = false;
+    });
+  }, { passive: true });
+  syncModeSelectorToScroll();
+}
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -2142,8 +2188,8 @@ function makeTimeframe(frame) {
 
 function emaRibbonMonitor(payload) {
   const frames = Array.isArray(payload?.timeframes) ? payload.timeframes : [];
-  const daily = frames.find((frame) => frame?.key === "1d");
-  return daily?.ema_ribbon_expansion || {};
+  const fifteenMinute = frames.find((frame) => frame?.key === "15m");
+  return fifteenMinute?.ema_ribbon_expansion || {};
 }
 
 function emaRibbonCard(signal) {
@@ -2160,8 +2206,8 @@ function emaRibbonCard(signal) {
   identity.append(symbol, name);
   const badge = document.createElement("span");
   badge.className = "ema-ribbon-stage priority";
-  badge.textContent = "實體跌破後開盤站回";
-  header.append(identity, badge, makeTradingViewLink(signal, "D"));
+  badge.textContent = "30分K・五線站回";
+  header.append(identity, badge, makeTradingViewLink(signal, "30"));
 
   const category = document.createElement("p");
   category.className = "ema-ribbon-category";
@@ -2171,9 +2217,9 @@ function emaRibbonCard(signal) {
   metrics.className = "ema-ribbon-metrics";
   const metricValues = [
     ["最低乖離", `${Number(signal.compression_pct || 0).toFixed(2)}%`],
-    ["目前乖離", `${Number(signal.current_spread_pct || 0).toFixed(2)}%`],
-    ["實際連續", `${Number(signal.alignment_streak || 0)} 根`],
-    ["距交纏", `${Number(signal.compression_bars_ago || 0)} 根`],
+    ["距壓縮", `${Number(signal.compression_bars_ago || 0)} 根`],
+    ["距跌破", `${Number(signal.break_bars_ago || 0)} 根`],
+    ["站回幅度", `${Number(signal.reclaim_margin_pct || 0).toFixed(2)}%`],
   ];
   for (const [label, value] of metricValues) {
     const metric = document.createElement("div");
@@ -2183,13 +2229,11 @@ function emaRibbonCard(signal) {
 
   const rule = document.createElement("p");
   rule.className = "ema-ribbon-rule";
-  const lines = (Array.isArray(signal.fast_break_lines) ? signal.fast_break_lines : [])
-    .map((line) => `EMA${line}`).join("＋");
-  rule.textContent = `前一日黑 K 實體跌破 ${lines || "快線"}；今日開盤 ${Number(signal.current_open || 0).toFixed(2)} 高於前日 EMA9 ${Number(signal.previous_ema9 || 0).toFixed(2)}。`;
+  rule.textContent = `30 分 K 於 ${Number(signal.break_bars_ago || 0)} 根前收盤跌破五線；最新完成 K 收盤 ${Number(signal.reclaim_close || 0).toFixed(2)}，重新站上五線最高值 ${Number(signal.reclaim_ema_high || 0).toFixed(2)}。`;
 
   const footer = document.createElement("p");
   footer.className = "ema-ribbon-footer";
-  footer.textContent = `${displayMarket(signal.market)} · ${signal.bar_time_et || "最新日線"} · 現價 ${formatSignalPrice(signal)}`;
+  footer.textContent = `${displayMarket(signal.market)} · ${signal.bar_time_et || "最新完成 30 分 K"} · 現價 ${formatSignalPrice(signal)}`;
   card.append(header, category, metrics, rule, footer);
   return card;
 }
@@ -2199,7 +2243,7 @@ function renderEmaRibbon(payload) {
   const monitor = emaRibbonMonitor(payload);
   const allSignals = Array.isArray(monitor.signals) ? monitor.signals : [];
   const signals = allSignals.filter((signal) => (
-    signal.stage === "open_reclaim"
+    signal.stage === "five_line_reclaim"
     && (emaRibbonFilterState.market === "all" || lineReclaimMarketGroup(signal) === emaRibbonFilterState.market)
   ));
   for (const button of elements.emaRibbonMarketFilters) {
@@ -2218,7 +2262,7 @@ function renderEmaRibbon(payload) {
   if (!signals.length) {
     const empty = document.createElement("p");
     empty.className = "line-reclaim-empty";
-    empty.textContent = "目前沒有同時通過五線交纏、受控乖離、快線實體跌破與隔日開盤站回的標的。";
+    empty.textContent = "目前沒有在 20 根完成 30 分 K 內依序通過五線壓縮、收盤跌破五線與第一根收盤站回五線的標的。";
     elements.emaRibbonSignals.replaceChildren(empty);
     return;
   }
@@ -2442,6 +2486,7 @@ if (elements.downloadWeeklyTradingViewList) {
   elements.downloadWeeklyTradingViewList.addEventListener("click", downloadWeeklyTradingViewList);
 }
 configureAppInstall();
+configureModeSelector();
 updateLineAlertControls();
 refresh();
 // The daily opening-reclaim panel is time-sensitive.  Data itself is fetched

@@ -15,11 +15,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styles.css?v=20261028-ema-reclaim2">
+    <link rel="stylesheet" href="assets/styles.css?v=20261029-ema-30m1">
   </head>
   <body>
     <main class="shell">
-      <section class="line-reclaim-command" aria-labelledby="line-reclaim-title">
+      <nav class="mode-switcher" aria-label="監控模式選擇">
+        <label for="mode-selector">
+          <span>模式選擇</span>
+          <select id="mode-selector">
+            <option value="line-reclaim-command">白線／橙線站回</option>
+            <option value="big-black-command">大黑 K 雷達</option>
+            <option value="ema-ribbon-command">30 分 EMA 五線站回</option>
+            <option value="market-pulse-mode">全球期貨脈搏</option>
+            <option value="weekly-reclaim-monitor">週 K 白線收復</option>
+            <option value="td-monitor">TD Sequential</option>
+          </select>
+        </label>
+        <p>選擇後直接跳到該監控區</p>
+      </nav>
+
+      <section id="line-reclaim-command" class="line-reclaim-command mode-target" aria-labelledby="line-reclaim-title">
         <div class="line-reclaim-command-head">
           <div>
             <p class="eyebrow">DAILY / WEEKLY OPEN RECLAIM · PRIORITY FEED</p>
@@ -100,7 +115,7 @@
         </div>
       </section>
 
-      <section class="big-black-command" aria-labelledby="big-black-title">
+      <section id="big-black-command" class="big-black-command mode-target" aria-labelledby="big-black-title">
         <div class="big-black-head">
           <div>
             <p class="eyebrow">LARGE BEARISH BODY · WHITE-LINE BREAK</p>
@@ -153,12 +168,12 @@
         </div>
       </section>
 
-      <section class="ema-ribbon-command" aria-labelledby="ema-ribbon-title">
+      <section id="ema-ribbon-command" class="ema-ribbon-command mode-target" aria-labelledby="ema-ribbon-title">
         <div class="ema-ribbon-head">
           <div>
-            <p class="eyebrow">EMA 9 · 21 · 50 · 150 · 200</p>
-            <h2 id="ema-ribbon-title">五線交纏後｜快線跌破開盤站回</h2>
-            <p class="ema-ribbon-lede">只收錄日線五條 EMA 曾壓縮至 3% 內、交纏距今不超過 20 根、目前乖離不超過 6%，且多頭排列實際持續 3～15 根的早期結構。前一日必須有黑 K 實體跌破 EMA9 或 EMA21，隔日開盤再站上前一日 EMA9；單純擴展或成熟噴出不進清單。</p>
+            <p class="eyebrow">30 MIN · EMA 9 · 21 · 50 · 150 · 200</p>
+            <h2 id="ema-ribbon-title">30 分 K｜五線壓縮後跌破站回</h2>
+            <p class="ema-ribbon-lede">只使用已完成的 30 分 K。五條 EMA 先壓縮至總乖離 3% 內，接著收盤跌到五線全部下方，並在壓縮後 20 根內出現第一根收盤重新站上五線全部上方；盤中未完成 K 棒與重複站回不進清單。</p>
           </div>
           <strong id="ema-ribbon-count" class="ema-ribbon-count">0</strong>
         </div>
@@ -175,11 +190,11 @@
           <a class="download-list ema-ribbon-download" href="data/KJ-EMA-Ribbon-Expansion.TXT" download>下載 TradingView 清單</a>
         </div>
         <div class="ema-ribbon-summary" aria-live="polite">
-          <p id="ema-ribbon-updated">正在讀取交纏後快線站回訊號…</p>
+          <p id="ema-ribbon-updated">正在讀取 30 分鐘五線站回訊號…</p>
           <p id="ema-ribbon-scan-count">等待掃描資料</p>
         </div>
         <div id="ema-ribbon-signals" class="ema-ribbon-signals" aria-live="polite">
-          <p class="line-reclaim-empty">正在同步五線交纏、快線跌破與隔日開盤站回訊號…</p>
+          <p class="line-reclaim-empty">正在同步 30 分 K 壓縮、跌破五線與第一根收盤站回訊號…</p>
         </div>
       </section>
 
@@ -207,7 +222,7 @@
         <a id="system-status-log" class="system-status-log" href="https://github.com/keeiithjan/us-selloff-radar/actions" target="_blank" rel="noopener noreferrer">查看 Actions Log</a>
       </section>
 
-      <section class="market-pulse" aria-labelledby="market-pulse-title">
+      <section id="market-pulse-mode" class="market-pulse mode-target" aria-labelledby="market-pulse-title">
         <div class="section-heading">
           <div>
             <p class="eyebrow">MARKET PULSE</p>
@@ -234,7 +249,7 @@
       </section>
 
       <section class="sequential-monitor" aria-label="技術監測">
-        <section class="weekly-reclaim-monitor" aria-labelledby="weekly-reclaim-title">
+        <section id="weekly-reclaim-monitor" class="weekly-reclaim-monitor mode-target" aria-labelledby="weekly-reclaim-title">
           <div class="section-heading weekly-reclaim-heading">
             <div>
               <p class="eyebrow">WEEKLY WHITE-LINE RECLAIM</p>
@@ -265,7 +280,7 @@
           <p id="weekly-reclaim-export-note" class="tradingview-export-note"></p>
           <div id="weekly-reclaim-signals" class="weekly-reclaim-signals" aria-live="polite"></div>
         </section>
-        <section class="td-monitor" aria-labelledby="sequential-title">
+        <section id="td-monitor" class="td-monitor mode-target" aria-labelledby="sequential-title">
           <div class="section-heading">
             <div>
               <p class="eyebrow">MULTI-TIMEFRAME SEQUENTIAL</p>
@@ -338,6 +353,6 @@
       </footer>
     </main>
     <script type="module" src="https://widgets.tradingview-widget.com/w/en/tv-ticker-tape.js"></script>
-    <script src="assets/app.js?v=20261028-ema-reclaim2"></script>
+    <script src="assets/app.js?v=20261029-ema-30m1"></script>
   </body>
 </html>

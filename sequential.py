@@ -163,6 +163,7 @@ TIMEFRAMES = (
     Timeframe("1h", "1 小時", "1h", "1y", "60", timedelta(hours=1)),
     Timeframe("1d", "日線", "1d", "2y", "D", None),
 )
+EMA_RIBBON_TIMEFRAME = Timeframe("30m", "30 分鐘", "30m", "60d", "30", timedelta(minutes=30))
 
 # This monitor deliberately keeps the current, still-forming week.  The user
 # wants the week's opening position and an intraweek drop/reclaim to count
@@ -621,8 +622,9 @@ def binance_stock_perpetual_symbols() -> list[str]:
 
 
 def _download_binance_frame(symbol: str, timeframe: Timeframe) -> pd.DataFrame:
+    limit = 500 if timeframe.key == "15m" else 120
     rows = _http_json_url(
-        f"{BINANCE_FUTURES_DATA_URL}/klines?symbol={symbol}&interval={timeframe.key}&limit=120"
+        f"{BINANCE_FUTURES_DATA_URL}/klines?symbol={symbol}&interval={timeframe.key}&limit={limit}"
     )
     if not isinstance(rows, list) or not rows:
         return pd.DataFrame()
@@ -699,6 +701,26 @@ def confirmed_bars(
             & (frame.index.time < session.session_close)
         ]
     return frame.loc[frame.index + timeframe.duration <= now_local]
+
+
+def resample_to_30_minutes(frame: pd.DataFrame) -> pd.DataFrame:
+    """Combine two aligned 15-minute bars into one 30-minute OHLC bar."""
+    if frame.empty or not {"Open", "High", "Low", "Close"}.issubset(frame.columns):
+        return pd.DataFrame()
+    aggregations: dict[str, str] = {
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+    }
+    if "Volume" in frame.columns:
+        aggregations["Volume"] = "sum"
+    return (
+        frame.sort_index()
+        .resample("30min", origin="start_day")
+        .agg(aggregations)
+        .dropna(subset=["Open", "High", "Low", "Close"])
+    )
 
 
 def signal_labels(state: SequentialState) -> list[str]:
@@ -2017,13 +2039,19 @@ def collect_signals(
     latest_completed: list[tuple[pd.Timestamp, MarketSession]] = []
 
     for instrument, raw in records:
-        if timeframe.key == "1d" and not raw.empty:
+        if timeframe.key == "15m" and not raw.empty:
+            ema_frame = confirmed_bars(
+                resample_to_30_minutes(raw),
+                EMA_RIBBON_TIMEFRAME,
+                instrument.session,
+                now,
+            )
             ema_ribbon_scanned_by_market[instrument.market] = (
                 ema_ribbon_scanned_by_market.get(instrument.market, 0) + 1
             )
-            ema_event = ema_ribbon_signal(raw, EMA_RIBBON_SETTINGS)
+            ema_event = ema_ribbon_signal(ema_frame, EMA_RIBBON_SETTINGS)
             if ema_event is not None:
-                event_index = raw.index[-1]
+                event_index = ema_frame.index[-1]
                 product_category = product_category_for(instrument, public_profile_cache)
                 tradingview_symbol = tradingview_symbol_for(instrument)
                 bar_date = pd.Timestamp(event_index)
@@ -2031,9 +2059,9 @@ def collect_signals(
                     bar_date = bar_date.tz_convert(instrument.session.timezone)
                 ema_ribbon_signals.append(
                     {
-                        "signal_id": f"ema-ribbon:1d:{tradingview_symbol}:{bar_date.date().isoformat()}",
-                        "signal_type": "ema_ribbon_expansion",
-                        "timeframe_key": "1d",
+                        "signal_id": f"ema-ribbon:30m:{tradingview_symbol}:{bar_date.isoformat()}",
+                        "signal_type": "ema_five_line_reclaim",
+                        "timeframe_key": "30m",
                         "symbol": instrument.symbol,
                         "name": instrument.name,
                         "industry": instrument.industry,
@@ -2041,14 +2069,14 @@ def collect_signals(
                         "exchange": instrument.exchange,
                         "tradingview_symbol": tradingview_symbol,
                         "market": instrument.market,
-                        "bar_time_et": format_bar_time(event_index, timeframe, instrument.session),
-                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
-                        "is_current_daily_bar": is_current_daily_bar(
-                            event_index, instrument.session, now
+                        "bar_time_et": format_bar_time(
+                            event_index, EMA_RIBBON_TIMEFRAME, instrument.session
                         ),
+                        "occurred_at_utc": occurrence_time_utc(event_index, instrument.session),
                         **ema_event,
                     }
                 )
+        if timeframe.key == "1d" and not raw.empty:
             daily_line_scanned_by_market[instrument.market] = (
                 daily_line_scanned_by_market.get(instrument.market, 0) + 1
             )
@@ -2250,9 +2278,9 @@ def collect_signals(
     )
     ema_ribbon_signals.sort(
         key=lambda item: (
-            float(item.get("current_spread_pct") or 999),
             int(item.get("compression_bars_ago") or 999),
-            -float(item.get("expansion_score") or 0),
+            int(item.get("break_bars_ago") or 999),
+            -float(item.get("reclaim_margin_pct") or 0),
             str(item.get("market") or ""),
             str(item.get("tradingview_symbol") or ""),
         )
@@ -2283,6 +2311,7 @@ def collect_signals(
             "signals": daily_big_black_signals,
         },
         "ema_ribbon_expansion": {
+            "timeframe_key": "30m",
             "settings": EMA_RIBBON_SETTINGS.as_dict(),
             "scanned_symbols": sum(ema_ribbon_scanned_by_market.values()),
             "scanned_by_market": ema_ribbon_scanned_by_market,
@@ -2604,16 +2633,16 @@ def weekly_reclaim_export_symbols(weekly_frame: dict[str, object]) -> list[str]:
 
 
 def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[str]:
-    """Return only qualified EMA opening-reclaim signals without duplicates."""
+    """Return only qualified 30-minute five-line reclaims without duplicates."""
     market_order = {"台股": 0, "美股": 1, "幣安 USDT 永續": 2, "Pepperstone CFD": 3}
     entries: dict[str, dict[str, object]] = {}
     for frame in frame_list:
-        if not isinstance(frame, dict) or frame.get("key") != "1d":
+        if not isinstance(frame, dict) or frame.get("key") != "15m":
             continue
         monitor = frame.get("ema_ribbon_expansion", {})
         signals = monitor.get("signals", []) if isinstance(monitor, dict) else []
         for signal in signals if isinstance(signals, list) else []:
-            if not isinstance(signal, dict) or signal.get("stage") != "open_reclaim":
+            if not isinstance(signal, dict) or signal.get("stage") != "five_line_reclaim":
                 continue
             symbol = str(signal.get("tradingview_symbol") or "").strip()
             if symbol:
@@ -2623,9 +2652,9 @@ def ema_ribbon_export_symbols(frame_list: Iterable[dict[str, object]]) -> list[s
         for symbol, _ in sorted(
             entries.items(),
             key=lambda item: (
-                float(item[1].get("current_spread_pct") or 999),
                 int(item[1].get("compression_bars_ago") or 999),
-                -float(item[1].get("expansion_score") or 0),
+                int(item[1].get("break_bars_ago") or 999),
+                -float(item[1].get("reclaim_margin_pct") or 0),
                 market_order.get(str(item[1].get("market") or ""), 99),
                 item[0],
             ),

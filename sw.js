@@ -1,13 +1,13 @@
 // Bump whenever the HTML references a new interface bundle.  Without this,
-// installed PWAs can keep serving an older cached shell even after Pages has
-// deployed the new weekly filters.
-const CACHE_NAME = "kj-radar-shell-v31";
+// installed PWAs can keep serving an older cached shell after Pages deploys
+// navigation, scanner, or presentation changes.
+const CACHE_NAME = "kj-radar-shell-v33";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./assets/styles.css?v=20261028-ema-reclaim2",
-  "./assets/app.js?v=20261028-ema-reclaim2",
+  "./assets/styles.css?v=20261029-ema-30m1",
+  "./assets/app.js?v=20261029-ema-30m1",
   "./assets/kj-radar-icon.svg",
 ];
 const LIVE_DATA_SUFFIXES = [
